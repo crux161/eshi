@@ -36,7 +36,13 @@ Eshi requires `ffmpeg` development libraries and `OpenMP`.
 **Dependencies (Debian):**
 ```bash
 sudo apt install pkg-config libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libomp-dev
-make -j$(nproc)
+make -f Makefile.linux_amd64 -j$(nproc)
+```
+
+**Dependencies (macOS, Intel):**
+```bash
+brew install libomp
+make -f Makefile.macOS_amd64 -j$(getconf _NPROCESSORS_ONLN)
 ```
 ___
 
