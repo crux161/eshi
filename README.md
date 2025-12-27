@@ -76,7 +76,7 @@ make examples
 ___
 
 ### 🏛️ License
-This project retain the MIT License of the original code.
+This project retains the MIT License of the original code.
 ___
 
 ### 📝 Finnaly 
