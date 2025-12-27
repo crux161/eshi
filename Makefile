@@ -13,7 +13,7 @@ EXAMPLE_SRCS := $(wildcard examples/*.cpp)
 EXAMPLE_BINS := $(patsubst examples/%.cpp, $(BUILD_DIR)/%, $(EXAMPLE_SRCS))
 
 
-all: $(BUILD_DIR)/eshi
+all: $(BUILD_DIR)/eshi examples
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)

@@ -7,7 +7,7 @@
 |:---:|:---:|:---:|
 | **Deep Sea**<br>![Deep Sea](resources/deepsea.gif) | **Fractal**<br>![Fractal](resources/fractal.gif) | **Polar**<br>![Polar](resources/polar.gif) |
 | **Raymarch**<br>![Raymarch](resources/raymarch.gif) | **Ripple**<br>![Ripple](resources/ripple.gif) | **Starfield**<br>![Starfield](resources/starfield.gif) |
-| **Tzozen**<br>![Tzozen](resources/tzozen.gif) | **Voronoi**<br>![Voronoi](resources/voronoi.gif) | **Standard**<br>![Output](resources/output.gif) |
+| **Tzozen**<br>![Tzozen](resources/tzozen.gif) | **Voronoi**<br>![Voronoi](resources/voronoi.gif) | **Bubbles**<br>![Bubbles](resources/bubbles.gif) |
 
 Eshi (Japanese for "painter" or "artist") is a minimal C++ framework that turns mathematical formulas into video. It allows you to write GLSL-style logic directly in C++, rendering procedural art to high-quality video files without needing a GPU pipeline or intermediate image sequences.
 
