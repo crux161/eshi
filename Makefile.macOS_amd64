@@ -1,10 +1,15 @@
 CXX      = g++
-CXXFLAGS = -I. -fopenmp -O3 -Wall -Wextra -flto -DLINK_SHADER
-OMP_LIB  = -lgomp
+
+# in macOS CXXFLAGS needs "-Xclang -fopenmp" and "-lomp" in OMP_LIB to build successfully
+CXXFLAGS = -I. -Xclang -fopenmp -O3 -Wall -Wextra -flto -DLINK_SHADER
+OMP_LIB  = -lomp
 
 PKGS     = libavcodec libavformat libavutil libswscale
-CXXFLAGS += $(shell pkg-config --cflags $(PKGS))
-LDFLAGS  = $(shell pkg-config --libs $(PKGS))
+
+# in macOS `brew install libomp` and add in include/link flags or NO BUILDY :(
+# this is for intel macs, Apple silicon apparently hosts those files elsewhere sorry rtfm
+CXXFLAGS += $(shell pkg-config --cflags $(PKGS)) -I/usr/local/opt/libomp/include
+LDFLAGS  = $(shell pkg-config --libs $(PKGS)) -L/usr/local/opt/libomp/lib
 
 BUILD_DIR = build
 
