@@ -2,6 +2,8 @@
 
 **A high-performance, CPU-based shader engine and video generator.**
 
+![deepsea gif](resources/deepsea.gif "...")
+
 Eshi (Japanese for "painter" or "artist") is a minimal C++ framework that turns mathematical formulas into video. It allows you to write GLSL-style logic directly in C++, rendering procedural art to high-quality video files without needing a GPU pipeline or intermediate image sequences.
 
 > *"Painting pixels with math."* 🥴🍹💫
