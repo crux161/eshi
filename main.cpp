@@ -54,31 +54,33 @@ int main(int argc, char **argv) {
         uint8_t* pixels = video.get_pixel_buffer(stride);
         vec2 iResolution((float)W, (float)H);
 
-        #pragma omp parallel for
+       #pragma omp parallel for
         for (int y = 0; y < H; ++y) {
             for (int x = 0; x < W; ++x) {
-                
                 vec4 color;
                 vec2 fragCoord((float)x, (float)y);
                 
-                // shader.cpp
+                // Render the pixel
                 mainImage(color, fragCoord, iResolution, time);
 
+                // Calculate memory index
                 int idx = y * stride + x * 3;
 
-		// clamp helper, prevents Image Overflow on macOS
-		auto clamp_u8 = [](float v) {
-		    if (v < 0.0f) v = 0.0f;
-		    if (v > 1.0f) v = 1.0f;
-		    return (uint8_t)(v * 255.0f);
-		};
+                // --- ROBUST CLAMPING FIX ---
+                // 1. Clamp float between 0.0 and 1.0
+                // 2. Multiply by 255
+                // 3. Cast to integer
+                
+                float r = fmaxf(0.0f, fminf(color.x, 1.0f));
+                float g = fmaxf(0.0f, fminf(color.y, 1.0f));
+                float b = fmaxf(0.0f, fminf(color.z, 1.0f));
 
-                pixels[idx + 0] = (uint8_t)(color.x * 255.0f);
-                pixels[idx + 1] = (uint8_t)(color.y * 255.0f);
-                pixels[idx + 2] = (uint8_t)(color.z * 255.0f);
+                pixels[idx + 0] = (uint8_t)(r * 255.0f);
+                pixels[idx + 1] = (uint8_t)(g * 255.0f);
+                pixels[idx + 2] = (uint8_t)(b * 255.0f);
             }
         }
-        video.submit_frame();
+	video.submit_frame();
     }
     return 0;
 }
