@@ -65,6 +65,14 @@ int main(int argc, char **argv) {
                 mainImage(color, fragCoord, iResolution, time);
 
                 int idx = y * stride + x * 3;
+
+		// clamp helper, prevents Image Overflow on macOS
+		auto clamp_u8 = [](float v) {
+		    if (v < 0.0f) v = 0.0f;
+		    if (v > 1.0f) v = 1.0f;
+		    return (uint8_t)(v * 255.0f);
+		};
+
                 pixels[idx + 0] = (uint8_t)(color.x * 255.0f);
                 pixels[idx + 1] = (uint8_t)(color.y * 255.0f);
                 pixels[idx + 2] = (uint8_t)(color.z * 255.0f);
