@@ -11,7 +11,7 @@ This project is heavily inspired by and builds upon the foundational concepts of
 
 While the original logic relied on generating raw **P6 Portable Pixmap (PPM)** files via standard output, **Eshi** evolves this concept by embedding the encoding pipeline directly into the application. Retaining the simplicity of the P6 pixel-stream philosophy but leverage direct memory access and multi-threading for significantly higher performance. 
 
-The goal for this silly little project would be to implement a small subset of code necessary to accept a simplified glsl function and produce either directly a video, or the raw P6 data. This of course has a lot of applications going forward, but I really liked his video on the topic and wanted to contribute something meaningful to the idea and give it my own spin :3 За здоровье!
+The goal for this silly little project would be to implement a small subset of code necessary to accept a simplified glsl function and produce either directly a video, or the raw P6 data. This of course has a lot of applications going forward, but I really liked his video on the topic and wanted to contribute something meaningful to the idea and give it my own spin :3 
 
 
 ### ✨ Features

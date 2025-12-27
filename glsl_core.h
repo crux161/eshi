@@ -1,3 +1,8 @@
+/*
+ * This file contains mathematical structures based on Tzozen's code
+ * Copyright (c) 2025 rexim (Tsoding)
+ * Licensed under the MIT License.
+ */
 #pragma once
 #include <math.h>
 #include <stdio.h>
