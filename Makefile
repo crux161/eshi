@@ -1,13 +1,15 @@
-UNAME_S := $(shell uname -a)
+UNAME_S := $(shell uname -s)
 
-CXX      = g++
-CXXFLAGS = -I. -fopenmp -O3 -Wall -Wextra -flto -DLINK_SHADER
-OMP_LIB  = -lgomp
+ifeq ($(UNAME_S), Linux)
+	CXX      = g++
+	CXXFLAGS = -I. -fopenmp -O3 -Wall -Wextra -flto -DLINK_SHADER
+	OMP_LIB  = -lgomp
+endif
 
 ifeq ($(UNAME_S), Darwin)
-	CXX		= clang++
+	CXX		= g++
 	BREW_PREFIX     := $(shell brew --prefix libomp)
-	CXXFLAGS 	= -I. -Xpreprocessor -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
+	CXXFLAGS 	= -std=c++11 -I. -Xclang -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
 	OMP_LIB 	= -L$(BREW_PREFIX)/lib -lomp
 endif
 
