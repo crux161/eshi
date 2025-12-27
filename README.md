@@ -5,6 +5,8 @@
 Eshi (Japanese for "painter" or "artist") is a minimal C++ framework that turns mathematical formulas into video. It allows you to write GLSL-style logic directly in C++, rendering procedural art to high-quality video files without needing a GPU pipeline or intermediate image sequences.
 
 > *"Painting pixels with math."* 🥴🍹💫
+>                -me
+___
 
 ### 🎨 Origins & Credits
 This project is heavily inspired by and builds upon the foundational concepts of **[Tzozen's](https://github.com/rexim/)** **[checker.c](https://gist.github.com/rexim/ef86bf70918034a5a57881456c0a0ccf)**.
@@ -39,12 +41,22 @@ void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
 }
 ```
 
-The resulting binary will render ```output.mp4```:
+## N.B.
+The code is set to produce a video with 240 frames, you of course will be responsible
+for adjusting that if you want anything different at this point.
+
+The resulting binary will render an mp4 with the same name:
 ```bash
-./renderer
+./deepsea
 # > Using OpenMP with 12 cores.
 # > Frame 240
 # > Video saved.
+```
+## Examples
+Build the examples with
+```bash
+make examples
+# Creates: build/deepsea, build/fractal, etc...
 ```
 
 ### 🏛️ License

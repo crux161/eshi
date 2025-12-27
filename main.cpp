@@ -1,15 +1,47 @@
-#include "shader.cpp" 
+#include "glsl_core.h"
+
+#ifndef LINK_SHADER
+	#include "shader.cpp"
+#else
+	void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime);
+#endif
+
+#include <string>
 #include <omp.h>
 
-int main() {
+std::string get_filename(std::string path) {
+    const size_t last_slash_idx = path.find_last_of("\\/");
+    if (std::string::npos != last_slash_idx) {
+        path.erase(0, last_slash_idx + 1);
+    }
 
-    // todo: parse this data from somewhere 
+    const size_t period_idx = path.rfind('.');
+    if (std::string::npos != period_idx) {
+        path.erase(period_idx);
+    }
+    return path;
+}
+
+int main(int argc, char **argv) {
+
+    // todo: replace, parse from somewhere else
     const int W = 16 * 60;
     const int H = 9 * 60;
     const int FRAMES = 240;
     const int FPS = 60;
 
-    SimpleEncoder video("output.mp4", W, H, FPS);
+    std::string output_file = "output.mp4"; // default
+    
+    if (argc > 0) {
+	std::string bin_name = get_filename(argv[0]);
+	if(!bin_name.empty()){
+		output_file = bin_name + ".mp4";
+	}
+    }
+
+    printf("Initializing Encoder: %s\n", output_file.c_str());
+
+    SimpleEncoder video(output_file.c_str(), W, H, FPS);
 
     #ifdef _OPENMP
         printf("Using OpenMP with %d cores.\n", omp_get_max_threads());

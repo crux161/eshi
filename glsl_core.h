@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+#include <algorithm> // std::max, std::min
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -17,22 +18,31 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-// --- GLSL MATH ---
-struct vec4 { 
-    float x, y, z, w; 
-    vec4(float x=0, float y=0, float z=0, float w=0) : x(x), y(y), z(z), w(w) {} 
-};
+struct vec4; 
 
 struct vec2 { 
     float x, y; 
     vec2(float x=0, float y=0) : x(x), y(y) {} 
-    vec2 yx() const{return vec2(y,x);} 
-    vec4 xyyx() const{return vec4(x,y,y,x);} 
+    
+    vec2 yx() const { return vec2(y,x); } 
+    
+    vec4 xyyx() const; 
 };
 
-// Operators
+struct vec4 { 
+    float x, y, z, w; 
+    vec4(float x=0, float y=0, float z=0, float w=0) : x(x), y(y), z(z), w(w) {}
+    
+    // Swizzles 
+    vec2 xy() const { return vec2(x, y); }
+    vec2 zw() const { return vec2(z, w); }
+};
+
+inline vec4 vec2::xyyx() const { return vec4(x, y, y, x); }
+
 inline vec2 operator *(const vec2 &a, float s) { return vec2(a.x*s, a.y*s); }
 inline vec2 operator +(const vec2 &a, float s) { return vec2(a.x+s, a.y+s); }
+inline vec2 operator -(const vec2 &a, float s) { return vec2(a.x-s, a.y-s); }
 inline vec2 operator *(float s, const vec2 &a) { return a*s; }
 inline vec2 operator -(const vec2 &a, const vec2 &b) { return vec2(a.x-b.x, a.y-b.y); }
 inline vec2 operator +(const vec2 &a, const vec2 &b) { return vec2(a.x+b.x, a.y+b.y); }
@@ -40,9 +50,12 @@ inline vec2 operator *(const vec2 &a, const vec2 &b) { return vec2(a.x*b.x, a.y*
 inline vec2 operator /(const vec2 &a, float s) { return vec2(a.x/s, a.y/s); }
 inline float dot(const vec2 &a, const vec2 &b) { return a.x*b.x + a.y*b.y; }
 inline vec2 abs(const vec2 &a) { return vec2(fabsf(a.x), fabsf(a.y)); } 
+inline vec2 floor(const vec2 &a) { return vec2(floorf(a.x), floorf(a.y)); }
 inline vec2 &operator +=(vec2 &a, const vec2 &b) { a = a + b; return a; }
 inline vec2 &operator +=(vec2 &a, float s) { a = a + s; return a; }
 inline vec2 cos(const vec2 &a) { return vec2(cosf(a.x), cosf(a.y)); } 
+
+// Vec4 Ops
 inline vec4 sin(const vec4 &a) { return vec4(sinf(a.x), sinf(a.y), sinf(a.z), sinf(a.w)); } 
 inline vec4 exp(const vec4 &a) { return vec4(expf(a.x), expf(a.y), expf(a.z), expf(a.w)); } 
 inline vec4 tanh(const vec4 &a) { return vec4(tanhf(a.x), tanhf(a.y), tanhf(a.z), tanhf(a.w)); } 
@@ -52,8 +65,17 @@ inline vec4 operator *(float s, const vec4 &a) { return a*s; }
 inline vec4 operator +(const vec4 &a, const vec4 &b) { return vec4(a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w); }
 inline vec4 &operator +=(vec4 &a, const vec4 &b) { a = a + b; return a; }
 inline vec4 operator -(float s, const vec4 &a) { return vec4(s-a.x, s-a.y, s-a.z, s-a.w); }
+inline vec4 operator /(const vec4 &a, float s) { return vec4(a.x/s, a.y/s, a.z/s, a.w/s); }
 inline vec4 operator /(const vec4 &a, const vec4 &b) { return vec4(a.x/b.x, a.y/b.y, a.z/b.z, a.w/b.w); }
- 
+
+inline float clamp(float x, float minVal, float maxVal) { return fmaxf(minVal, fminf(x, maxVal)); }
+inline float smoothstep(float edge0, float edge1, float x) {
+    float t = clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+inline float length(vec2 v) { return sqrtf(dot(v, v)); }
+inline vec4 mix(vec4 x, vec4 y, float a) { return x * (1.0f - a) + y * a; }
+
 class SimpleEncoder {
     int width, height, fps, frame_idx;
     AVFormatContext *fmt_ctx = NULL;
