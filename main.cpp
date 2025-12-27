@@ -54,6 +54,37 @@ int main(int argc, char **argv) {
         uint8_t* pixels = video.get_pixel_buffer(stride);
         vec2 iResolution((float)W, (float)H);
 
+       /* Lambda clamping
+	*
+	* This version produces slightly off results,
+	* with integer overflow noticable in macOS espcially.
+	*
+	* #pragma omp parallel for
+        for (int y = 0; y < H; ++y) {
+            for (int x = 0; x < W; ++x) {
+                
+                vec4 color;
+                vec2 fragCoord((float)x, (float)y);
+                
+                // CALL THE FUNCTION FROM shader.cpp
+                mainImage(color, fragCoord, iResolution, time);
+
+                // Write to buffer
+                int idx = y * stride + x * 3;
+
+		auto clamp_u8 = [](float v) {
+		    if (v < 0.0f) v = 0.0f;
+		    if (v > 1.0f) v = 1.0f;
+		    return (uint8_t)(v * 255.0f);
+		};
+                pixels[idx + 0] = (uint8_t)(color.x * 255.0f);
+                pixels[idx + 1] = (uint8_t)(color.y * 255.0f);
+                pixels[idx + 2] = (uint8_t)(color.z * 255.0f);
+            }
+        }
+	*
+	*/
+
        #pragma omp parallel for
         for (int y = 0; y < H; ++y) {
             for (int x = 0; x < W; ++x) {
