@@ -9,7 +9,7 @@ Eshi (Japanese for "painter" or "artist") is a minimal C++ framework that turns 
 ### 🎨 Origins & Credits
 This project is heavily inspired by and builds upon the foundational concepts of **[Tzozen's](https://github.com/rexim/)** **[checker.c](https://gist.github.com/rexim/ef86bf70918034a5a57881456c0a0ccf)**.
 
-While the original logic relied on generating raw **P6 Portable Pixmap (PPM)** files via standard output, **Eshi** evolves this concept by embedding the encoding pipeline directly into the application. Retaining the simplicity of the P6 pixel-stream philosophy but leverage direct memory access and multi-threading for significantly higher performance. 
+While the original logic relied on generating raw **P6 Portable Pixmap (PPM)** files via standard output, **Eshi** evolves this concept by embedding the encoding pipeline directly into the application. Retaining the simplicity of the P6 pixel-stream philosophy but now with direct memory access and multi-threading for significantly higher performance. 
 
 The goal for this silly little project would be to implement a small subset of code necessary to accept a simplified glsl function and produce either directly a video, or the raw P6 data. This of course has a lot of applications going forward, but I really liked his video on the topic and wanted to contribute something meaningful to the idea and give it my own spin :3 
 
@@ -18,7 +18,7 @@ The goal for this silly little project would be to implement a small subset of c
 * **Zero-IO Rendering:** Renders directly to H.264 (`.mp4`) in memory using linked FFmpeg libraries. No more generating thousands of `.ppm` files on disk.
 * **CPU Shaders:** Includes a robust math library that emulates GLSL types (`vec2`, `vec4`) and intrinsics (`dot`, `mix`, `sin`, `swizzling`) in standard C++.
 * **Embarrassingly Parallel:** Native **OpenMP** support automatically utilizes all available CPU cores to render frames in parallel.
-* **Hot-Swappable Logic:** Separation of concerns allows you to edit `shader.cpp` independently from the core engine.
+* **Hot-Swappable Logic:** edit `shader.cpp` independently from the core engine.
 
 ### 🛠️ Build & Dependencies
 Eshi requires `ffmpeg` development libraries and `OpenMP`.
@@ -26,7 +26,7 @@ Eshi requires `ffmpeg` development libraries and `OpenMP`.
 **Dependencies (Debian):**
 ```bash
 sudo apt install pkg-config libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libomp-dev
-./build.sh
+make -j$(nproc)
 ```
 
 ### 🚀 Usage
@@ -41,7 +41,7 @@ void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
 
 The resulting binary will render ```output.mp4```:
 ```bash
-./eshi
+./renderer
 # > Using OpenMP with 12 cores.
 # > Frame 240
 # > Video saved.
