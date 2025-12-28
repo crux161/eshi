@@ -27,13 +27,11 @@ ifeq ($(detected_OS),Darwin)
     CXX         = clang++
     BREW_PREFIX := $(shell brew --prefix libomp)
     # Clang requires -Xpreprocessor for OpenMP
-    CXXFLAGS    = -std=c++11 -I. -Xpreprocessor -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
+    CXXFLAGS    = -std=c++11 -I. -Xclang -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
     OMP_LIB     = -L$(BREW_PREFIX)/lib -lomp
 endif
 
 ifeq ($(detected_OS),Linux)
-    # Linux specifics (usually covered by defaults, but explicit checks here if needed)
-    # Note: Removed the hardcoded -I/usr/include... as pkg-config usually handles this cleaner
 endif
 
 PKGS     = libavcodec libavformat libavutil libswscale
