@@ -76,6 +76,9 @@ inline float smoothstep(float edge0, float edge1, float x) {
 inline float length(vec2 v) { return sqrtf(dot(v, v)); }
 inline vec4 mix(vec4 x, vec4 y, float a) { return x * (1.0f - a) + y * a; }
 
+// --------------------------------------------------------
+// VIDEO ENCODER
+// --------------------------------------------------------
 class SimpleEncoder {
     int width, height, fps, frame_idx;
     AVFormatContext *fmt_ctx = NULL;
@@ -102,37 +105,108 @@ class SimpleEncoder {
 public:
     SimpleEncoder(const char* filename, int w, int h, int fps_val) 
         : width(w), height(h), fps(fps_val), frame_idx(0) {
+        
+        // 1. Allocate Format Context
         avformat_alloc_output_context2(&fmt_ctx, NULL, NULL, filename);
-	//
-	// we can choose hardware accel, h264_nvenc, h264_amd, or h264_videotoolbox
-	const AVCodec *codec = avcodec_find_encoder_by_name("h264_nvenc");
-	if (!codec) codec = avcodec_find_encoder(AV_CODEC_ID_H264); // fallback
+        if (!fmt_ctx) {
+            fprintf(stderr, "Could not create output context\n");
+            exit(1);
+        }
 
+        // 2. Hardware Encoder Selection Strategy
+        const AVCodec *codec = NULL;
+
+        // Try NVIDIA (Windows/Linux)
+        if (!codec) {
+            codec = avcodec_find_encoder_by_name("h264_nvenc");
+            if (codec) printf("Video Encoder: Using Hardware (NVIDIA h264_nvenc)\n");
+        } 
+        
+        // Try AMD (Windows/Linux)
+        if (!codec) {
+            codec = avcodec_find_encoder_by_name("h264_amf");
+            if (codec) printf("Video Encoder: Using Hardware (AMD h264_amf)\n");
+        }
+
+        // Try Apple Silicon / Intel Mac (macOS)
+        if (!codec) {
+            codec = avcodec_find_encoder_by_name("h264_videotoolbox");
+            if (codec) printf("Video Encoder: Using Hardware (Apple h264_videotoolbox)\n");
+        }
+
+        // Try Intel QuickSync (Windows/Linux)
+        if (!codec) {
+            codec = avcodec_find_encoder_by_name("h264_qsv");
+            if (codec) printf("Video Encoder: Using Hardware (Intel h264_qsv)\n");
+        }
+
+        // Fallback to Software (libx264)
+        if (!codec) {
+            codec = avcodec_find_encoder(AV_CODEC_ID_H264);
+            printf("Video Encoder: Using Software (libx264)\n");
+        }
+
+        if (!codec) {
+            fprintf(stderr, "Error: No suitable H.264 encoder found.\n");
+            exit(1);
+        }
+
+        // 3. Initialize Stream & Context
         stream = avformat_new_stream(fmt_ctx, codec);
         c_ctx = avcodec_alloc_context3(codec);
         c_ctx->width = width; c_ctx->height = height;
         c_ctx->time_base = (AVRational){1, fps};
         c_ctx->framerate = (AVRational){fps, 1};
         c_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-        if (fmt_ctx->oformat->flags & AVFMT_GLOBALHEADER) c_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-        avcodec_open2(c_ctx, codec, NULL);
+        
+        if (fmt_ctx->oformat->flags & AVFMT_GLOBALHEADER) 
+            c_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+        if (avcodec_open2(c_ctx, codec, NULL) < 0) {
+            fprintf(stderr, "Could not open codec\n");
+            exit(1);
+        }
+
         avcodec_parameters_from_context(stream->codecpar, c_ctx);
-        if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) avio_open(&fmt_ctx->pb, filename, AVIO_FLAG_WRITE);
-        avformat_write_header(fmt_ctx, NULL); // Ignored return value fixed by (void) if strict
-        rgb_frame = av_frame_alloc(); rgb_frame->format = AV_PIX_FMT_RGB24; rgb_frame->width=w; rgb_frame->height=h; av_frame_get_buffer(rgb_frame, 32);
-        yuv_frame = av_frame_alloc(); yuv_frame->format = AV_PIX_FMT_YUV420P; yuv_frame->width=w; yuv_frame->height=h; av_frame_get_buffer(yuv_frame, 32);
+
+        if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) 
+            avio_open(&fmt_ctx->pb, filename, AVIO_FLAG_WRITE);
+
+        // Ignore return value warning safely
+        if(avformat_write_header(fmt_ctx, NULL) < 0) {
+             fprintf(stderr, "Error occurred when opening output file\n");
+             exit(1);
+        }
+
+        // 4. Allocate Frames
+        rgb_frame = av_frame_alloc(); 
+        rgb_frame->format = AV_PIX_FMT_RGB24; 
+        rgb_frame->width=w; 
+        rgb_frame->height=h; 
+        av_frame_get_buffer(rgb_frame, 32);
+        
+        yuv_frame = av_frame_alloc(); 
+        yuv_frame->format = AV_PIX_FMT_YUV420P; 
+        yuv_frame->width=w; 
+        yuv_frame->height=h; 
+        av_frame_get_buffer(yuv_frame, 32);
+        
         sws_ctx = sws_getContext(w, h, AV_PIX_FMT_RGB24, w, h, AV_PIX_FMT_YUV420P, SWS_BILINEAR, NULL, NULL, NULL);
     }
+
     ~SimpleEncoder() {
-        encode_internal(NULL); av_write_trailer(fmt_ctx);
+        encode_internal(NULL); 
+        av_write_trailer(fmt_ctx);
         if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) avio_closep(&fmt_ctx->pb);
         printf("\nDone.\n");
     }
+
     uint8_t* get_pixel_buffer(int& out_linesize) {
         av_frame_make_writable(rgb_frame);
         out_linesize = rgb_frame->linesize[0];
         return rgb_frame->data[0];
     }
+
     void submit_frame() {
         sws_scale(sws_ctx, (const uint8_t * const *)rgb_frame->data, rgb_frame->linesize, 0, height, yuv_frame->data, yuv_frame->linesize);
         yuv_frame->pts = frame_idx++;
