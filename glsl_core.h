@@ -103,7 +103,11 @@ public:
     SimpleEncoder(const char* filename, int w, int h, int fps_val) 
         : width(w), height(h), fps(fps_val), frame_idx(0) {
         avformat_alloc_output_context2(&fmt_ctx, NULL, NULL, filename);
-        const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_H264);
+	//
+	// we can choose hardware accel, h264_nvenc, h264_amd, or h264_videotoolbox
+	const AVCodec *codec = avcodec_find_encoder_by_name("h264_nvenc");
+	if (!codec) codec = avcodec_find_encoder(AV_CODEC_ID_H264); // fallback
+
         stream = avformat_new_stream(fmt_ctx, codec);
         c_ctx = avcodec_alloc_context3(codec);
         c_ctx->width = width; c_ctx->height = height;
