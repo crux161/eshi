@@ -1,3 +1,4 @@
+resources/compat/
 build/
 renderer
 main
