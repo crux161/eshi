@@ -11,9 +11,11 @@ OMP_LIB   = -lgomp
 EXE_EXT   = 
 RM_CMD    = rm -rf
 
-
 ifeq ($(detected_OS),Windows)
+    # Windows (MinGW/MSYS2)
+    # Your specific Chocolatey path
     FFMPEG_PATH := C:\ProgramData\chocolatey\lib\ffmpeg-shared\tools\ffmpeg-8.0.1-full_build-shared
+    # LDFLAGS for Windows usually need to point to the 'lib' folder explicitly if not in PATH
     LDFLAGS_EXTRA = -L"$(FFMPEG_PATH)\lib"
     
     EXE_EXT = .exe
@@ -21,9 +23,11 @@ ifeq ($(detected_OS),Windows)
 endif
 
 ifeq ($(detected_OS),Darwin)
+    # macOS (Clang)
     CXX         = clang++
     BREW_PREFIX := $(shell brew --prefix libomp)
-    CXXFLAGS    = -std=c++11 -I. -Xpreprocessor -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
+    # Clang requires -Xpreprocessor for OpenMP
+    CXXFLAGS    = -std=c++11 -I. -Xclang -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
     OMP_LIB     = -L$(BREW_PREFIX)/lib -lomp
 endif
 
@@ -36,19 +40,23 @@ LDFLAGS  = $(shell pkg-config --libs $(PKGS)) $(LDFLAGS_EXTRA)
 
 MAIN_OBJ = main.o
 EXAMPLE_SRCS := $(wildcard examples/*.cpp)
+# Logic: examples/deepsea.cpp -> build/deepsea.exe (on Windows) or build/deepsea (on Unix)
 EXAMPLE_BINS := $(patsubst examples/%.cpp, $(BUILD_DIR)/%$(EXE_EXT), $(EXAMPLE_SRCS))
 
+
 all: $(BUILD_DIR)/eshi$(EXE_EXT) examples
-	@echo "Cleaning up object files..."
+	@echo "Cleaning up object files.."
 	@$(RM_CMD) *.o
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 
+# Main Renderer (Linked against ROOT shader.cpp)
 $(BUILD_DIR)/eshi$(EXE_EXT): $(MAIN_OBJ) shader.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(MAIN_OBJ) shader.o -o $@ $(LDFLAGS) $(OMP_LIB)
 
 examples: $(EXAMPLE_BINS)
+
 
 
 main.o: main.cpp glsl_core.h

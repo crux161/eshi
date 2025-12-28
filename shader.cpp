@@ -2,10 +2,8 @@
 #include <math.h>
 
 void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
-    // 1. Normalize UV
     vec2 uv = fragCoord / iResolution.y;
 
-    // 2. Simple Time-Based Color Gradient
     float r = 0.5f + 0.5f * sinf(iTime + uv.x);
     float g = 0.5f + 0.5f * sinf(iTime + uv.y + 2.0f);
     float b = 0.5f + 0.5f * sinf(iTime + uv.x + 4.0f);
