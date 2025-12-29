@@ -3,7 +3,7 @@
 
 // --- Random Hash Function ---
 // Returns a random vec2 between 0-1 based on an input vec2
-inline vec2 hash2(vec2 p) {
+SHADER_CTX inline vec2 hash2(vec2 p) {  // <--- ADDED SHADER_CTX
     // Standard pseudo-random hash
     p = vec2(dot(p, vec2(127.1f, 311.7f)),
              dot(p, vec2(269.5f, 183.3f)));

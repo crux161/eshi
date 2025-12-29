@@ -1,4 +1,5 @@
 #include "glsl_core.h"
+#include "encoder.h"
 #include "renderer_cpu.h" 
 
 #include <string>
@@ -99,5 +100,6 @@ int main(int argc, char** argv) {
         }
 	*
 	*/
+
 
 

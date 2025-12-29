@@ -2,7 +2,7 @@
 #include <math.h>
 
 // --- Random Hash ---
-inline float hash(float n) { 
+SHADER_CTX inline float hash(float n) {  // <--- ADDED SHADER_CTX
     float s = sinf(n) * 43758.5453123f;
     return s - floorf(s);
 }
