@@ -1,7 +1,7 @@
 #include "glsl_core.h"
 #include <math.h>
 
-void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     // 1. Zoom and Pan
     // Zoom oscillates over time
     float zoom = 1.5f + sinf(iTime * 0.5f) * 0.5f;

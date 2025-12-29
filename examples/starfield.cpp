@@ -2,12 +2,12 @@
 #include <math.h>
 
 // --- Random Hash ---
-inline float hash(float n) { 
+SHADER_CTX inline float hash(float n) {  // <--- ADDED SHADER_CTX
     float s = sinf(n) * 43758.5453123f;
     return s - floorf(s);
 }
 
-void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     vec2 uv = (fragCoord - iResolution * 0.5f) / iResolution.y;
     vec4 col = vec4(0,0,0,1);
     

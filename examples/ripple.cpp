@@ -1,7 +1,7 @@
 #include "glsl_core.h"
 
 // Plasma Ripple
-void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     
     vec2 uv = (fragCoord - iResolution * 0.5f) / iResolution.y;
 

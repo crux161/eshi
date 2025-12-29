@@ -1,18 +1,17 @@
 #include "glsl_core.h"
 #include <math.h>
 
-// We treat x,y,z as 3D and w as 0
-inline float dot3(vec4 a, vec4 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
-inline float length3(vec4 v) { return sqrtf(dot3(v, v)); }
-inline vec4 normalize3(vec4 v) { float l = length3(v); return (l==0.0f) ? vec4(0,0,0,0) : v / l; }
+SHADER_CTX inline float dot3(vec4 a, vec4 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
+SHADER_CTX inline float length3(vec4 v) { return sqrtf(dot3(v, v)); }
+SHADER_CTX inline vec4 normalize3(vec4 v) { float l = length3(v); return (l==0.0f) ? vec4(0,0,0,0) : v / l; }
 
 // Signed Distance Function for a Sphere
-float map(vec4 p) {
+SHADER_CTX float map(vec4 p) {  // <--- ADDED SHADER_CTX
     // Sphere radius 1.0 at (0,0,0)
     return length3(p) - 1.0f;
 }
 
-void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     // 1. Setup Coordinates
     vec2 uv = (fragCoord - iResolution * 0.5f) / iResolution.y;
 
