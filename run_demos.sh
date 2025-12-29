@@ -1,87 +1,109 @@
 #!/bin/bash
 
-# 1. Use /bin/bash to support TIMEFORMAT and [[ ]] logic properly.
-# 2. Define directory relative to the script location, not where you run it from.
-DIR="$(cd "$(dirname "$0")" && pwd)/build"
+mkdir -p logs
+
+if [ ! -d "build" ]; then
+    echo "❌ Error: Build directory not found. Run 'make' first."
+    exit 1
+fi
+cd build || exit 1
+
+DEMOS=("deepsea" "neon" "bubbles" "fractal" "polar" "raymarch" "ripple" "starfield" "tzozen" "voronoi")
+TOTAL_FRAMES_PER_DEMO=240
+TOTAL_DEMOS=${#DEMOS[@]}
 ARGS=""
-GPU_ID=""
 
-# --- PARSE ARGUMENTS ---
-while [[ "$#" -gt 0 ]]; do
-    case "$1" in
-        --gpu)
-            # Pass the boolean flag to the C++ executable
-            ARGS="--gpu"
-            
-            # Optional: If the user provides a number (e.g. --gpu 0), use it for CUDA
-            # This allows you to pick a specific card if you have multiple.
-            if [[ -n "$2" ]] && [[ "$2" != --* ]]; then
-                GPU_ID="$2"
-                shift # Consume the value
-            fi
-            ;;
-        *)
-            echo "Unknown option: $1"
-            exit 1
-            ;;
-    esac
-    shift # Consume the flag
-done
 
-# --- RUN LOGIC ---
-if [ ! -d "$DIR" ]; then
-    echo "Error: Build directory not found at $DIR"
-    echo "Please run 'make' first."
+if ! command -v gum &> /dev/null; then
+    echo "❌ Gum is not installed."
     exit 1
 fi
 
-echo "Starting demos in: $DIR"
-if [[ -n "$ARGS" ]]; then
-    echo "Mode: GPU Accelerated"
-    if [[ -n "$GPU_ID" ]]; then
-        echo "Targeting CUDA Device: $GPU_ID"
-        export CUDA_VISIBLE_DEVICES="$GPU_ID"
-    fi
-else
-    echo "Mode: CPU (OpenMP)"
-fi
 
-# Define the run function
-run_suite() {
-    # Move into build dir so executables find their assets if needed
-    cd "$DIR" || exit 1
+COLOR_BAR="\033[38;5;212m"
+COLOR_BG="\033[38;5;240m"
+COLOR_TEXT="\033[38;5;255m"
+COLOR_SUCCESS="\033[38;5;42m"
+COLOR_ERROR="\033[38;5;196m"
+RESET="\033[0m"
 
-    # Set bash time format to just the seconds
-    TIMEFORMAT="Time: %3lR seconds"
 
-    # Run sequentially. Stop if one fails (&&).
-    # We pass $ARGS (which is empty for CPU, or "--gpu" for GPU)
-    time ./deepsea $ARGS && \
-    time ./fractal $ARGS && \
-    time ./polar $ARGS && \
-    time ./raymarch $ARGS && \
-    time ./ripple $ARGS && \
-    time ./starfield $ARGS && \
-    time ./tzozen $ARGS && \
-    time ./voronoi $ARGS
+draw_progress() {
+    local name=$1
+    local frame=$2
+    local demo_idx=$3
+
+    local pct=$(( frame * 100 / TOTAL_FRAMES_PER_DEMO ))
+    if [ $pct -gt 100 ]; then pct=100; fi
+
+    local width=30
+    local filled=$(( pct * width / 100 ))
+    local empty=$(( width - filled ))
+
+    local bar_filled=$(printf "%0.s█" $(seq 1 $filled))
+    local bar_empty=$(printf "%0.s░" $(seq 1 $empty))
+
+    local overall="$((demo_idx + 1))/$TOTAL_DEMOS"
+
+    printf "\r${COLOR_TEXT}%-12s ${COLOR_BAR}%s${COLOR_BG}%s${RESET} %3d%% ${COLOR_BG}(%s)${RESET}\033[K" \
+        "$name" "$bar_filled" "$bar_empty" "$pct" "$overall"
 }
 
-# --- EXECUTION & TIMING ---
+
+gum style --border normal --margin "1" --padding "1 2" --border-foreground 212 "🎨 Eshi Render Suite"
+
+MODE=$(gum choose "CPU (OpenMP)" "GPU (CUDA)" --header "Select Rendering Engine")
+
+if [ "$MODE" == "GPU (CUDA)" ]; then
+    ARGS="--gpu"
+fi
+
+echo ""
+gum style --foreground 212 "Starting render engine..."
+echo ""
+
+
 start_time=$(date +%s%3N)
 
-# Run the suite
-run_suite
+for i in "${!DEMOS[@]}"; do
+    demo="${DEMOS[$i]}"
 
-# Check if the suite succeeded
-if [ $? -eq 0 ]; then
-    end_time=$(date +%s%3N)
-    duration=$((end_time - start_time))
-    # Calculate seconds with 3 decimal places
-    hr_duration=$(echo "scale=3; $duration / 1000" | bc)
-    
-    echo "--------------------------------------"
-    echo "All demos finished in: $hr_duration seconds"
-else
-    echo "--------------------------------------"
-    echo "Demo suite failed or was interrupted."
-fi
+
+    LOG_FILE="../logs/${demo}.log"
+
+
+    stdbuf -oL ./"$demo" $ARGS 2> "$LOG_FILE" | tr '\r' '\n' | \
+    while read -r line; do
+        if [[ "$line" =~ Frame\ ([0-9]+) ]]; then
+            frame_num="${BASH_REMATCH[1]}"
+            draw_progress "$demo" "$frame_num" "$i"
+        fi
+    done
+
+    exit_codes=("${PIPESTATUS[@]}")
+    binary_exit_code=${exit_codes[0]}
+
+    if [ $binary_exit_code -ne 0 ]; then
+        echo ""
+        echo -e "${COLOR_ERROR}❌ Failed to render $demo${RESET}"
+        gum style --foreground 240 "ERROR LOG ($LOG_FILE):"
+        if [ -f "$LOG_FILE" ]; then cat "$LOG_FILE"; fi
+        exit 1
+    else
+        printf "\r${COLOR_SUCCESS}✓ %-12s${RESET} %s\033[K\n" "$demo" "Rendered"
+    fi
+done
+
+
+end_time=$(date +%s%3N)
+duration=$((end_time - start_time))
+hr_duration=$(echo "scale=3; $duration / 1000" | bc)
+
+echo ""
+gum style \
+	--border double \
+	--margin "1" \
+	--padding "1 2" \
+	--border-foreground 212 \
+	--foreground 255 \
+	"✨ All demos finished in ${hr_duration}s"

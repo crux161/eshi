@@ -1,9 +1,9 @@
 #pragma once
 #include "glsl_core.h"
 #include <omp.h>
-#include <algorithm> // for std::max/min
+#include <algorithm> 
 
-// Logic to link shader dynamically or statically
+
 #ifndef LINK_SHADER
     #include "shader.cpp"
 #else
@@ -22,25 +22,25 @@ public:
         #endif
     }
 
-    // The function that does the heavy lifting
+    
     void renderFrame(uint8_t* pixelBuffer, int stride, float time) {
         vec2 iResolution((float)width, (float)height);
 
         #pragma omp parallel for
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
-                // 1. Calculate Pixel
+                
                 vec4 color;
                 vec2 fragCoord((float)x, (float)y);
                 mainImage(color, fragCoord, iResolution, time);
 
-                // 2. Clamp & Convert
-                // We inline the clamp logic here for speed
+                
+                
                 float r = fmaxf(0.0f, fminf(color.x, 1.0f));
                 float g = fmaxf(0.0f, fminf(color.y, 1.0f));
                 float b = fmaxf(0.0f, fminf(color.z, 1.0f));
 
-                // 3. Write to memory
+                
                 int idx = y * stride + x * 3;
                 pixelBuffer[idx + 0] = (uint8_t)(r * 255.0f);
                 pixelBuffer[idx + 1] = (uint8_t)(g * 255.0f);

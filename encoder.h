@@ -11,9 +11,9 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-// --------------------------------------------------------
-// VIDEO ENCODER (CPU ONLY)
-// --------------------------------------------------------
+
+
+
 class SimpleEncoder {
     int width, height, fps, frame_idx;
     AVFormatContext *fmt_ctx = NULL;
@@ -40,7 +40,7 @@ class SimpleEncoder {
 public:
     SimpleEncoder(const char* filename, int w, int h, int fps_val) 
         : width(w), height(h), fps(fps_val), frame_idx(0) {
-        
+       
         avformat_alloc_output_context2(&fmt_ctx, NULL, NULL, filename);
         if (!fmt_ctx) { fprintf(stderr, "Could not create output context\n"); exit(1); }
 
@@ -61,6 +61,18 @@ public:
         c_ctx->framerate = (AVRational){fps, 1};
         c_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
         
+	
+        
+        
+        
+        
+        int64_t target_bitrate = (int64_t)width * height * fps * 0.25; 
+        c_ctx->bit_rate = target_bitrate;
+        
+        
+        c_ctx->rc_max_rate = target_bitrate * 1.5;
+        c_ctx->rc_buffer_size = target_bitrate;
+
         if (fmt_ctx->oformat->flags & AVFMT_GLOBALHEADER) 
             c_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 

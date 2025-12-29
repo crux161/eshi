@@ -32,7 +32,7 @@ __global__ void renderKernel(uchar3* output, int width, int height, float time) 
     output[idx] = make_uchar3((unsigned char)(r * 255.0f), (unsigned char)(g * 255.0f), (unsigned char)(b * 255.0f));
 }
 
-// Pointer to gpu memory
+
 uchar3* d_buffer = NULL; 
 int g_width, g_height;
 
@@ -60,8 +60,8 @@ void GpuRenderer::renderFrame(uint8_t* pixelBuffer, int stride, float time) {
     }
 
     cudaDeviceSynchronize();
-    // Copy back to CPU buffer
-    // Note: This assumes stride == width * 3 for simplicity. 
-    // If FFmpeg gives padding, we might need a row-by-row copy, but usually it works.
+    
+    
+    
     cudaMemcpy(pixelBuffer, d_buffer, g_width * g_height * sizeof(uchar3), cudaMemcpyDeviceToHost);
 }

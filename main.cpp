@@ -1,9 +1,11 @@
 #include "glsl_core.h"
 #include "encoder.h"
 #include "renderer_cpu.h" 
+#include "display.h" 
 
 #include <string>
 #include <iostream>
+#include <vector>
 
 #ifdef USE_CUDA
     #include "renderer_gpu.h"
@@ -18,88 +20,105 @@ std::string get_filename(std::string path) {
 }
 
 int main(int argc, char** argv) {
-    const int W = 16 * 60;   // 960 px
-    const int H = 9 * 60;    // 540 px
-    const int FRAMES = 240;
+    
+    int W = 960; 
+    int H = 540;
     const int FPS = 60;
-
+    
+    
+    bool use_gpu = false;
+    bool live_mode = false;
     std::string output_name = "output.mp4";
+
+    
     if (argc > 0) {
         std::string bin_name = get_filename(argv[0]);
         if (!bin_name.empty()) output_name = bin_name + ".mp4";
     }
 
-    bool use_gpu = false;
-    for(int i=0; i<argc; i++){
-	if(std::string(argv[i]) == "--gpu") { use_gpu = true; }
+    
+    for(int i=1; i<argc; i++){
+        std::string arg = argv[i];
+        
+        if(arg == "--gpu")  use_gpu = true;
+        if(arg == "--live") live_mode = true;
+        
+        
+        if(arg == "--res") {
+            if (i + 1 < argc) {
+                std::string res_str = argv[++i]; 
+                size_t x_pos = res_str.find('x');
+                if (x_pos != std::string::npos) {
+                    try {
+                        W = std::stoi(res_str.substr(0, x_pos));
+                        H = std::stoi(res_str.substr(x_pos + 1));
+                    } catch (...) {
+                        fprintf(stderr, "Invalid resolution format. Use WIDTHxHEIGHT (e.g. 1280x720)\n");
+                    }
+                }
+            }
+        }
     }
 
     printf("Initializing Engine...\n");
-    printf("Output: %s [%dx%d @ %d FPS]\n", output_name.c_str(), W, H, FPS);
+    if (live_mode) printf("Mode: Live Window [%dx%d]\n", W, H);
+    else           printf("Mode: File Render -> %s [%dx%d]\n", output_name.c_str(), W, H);
 
-    SimpleEncoder video(output_name.c_str(), W, H, FPS);
     
-    if (use_gpu) {
-        #ifdef USE_CUDA
-            printf("--- STARTING GPU RENDER ---\n");
-            GpuRenderer gpu(W, H);
+    CpuRenderer* cpu_renderer = nullptr;
+    #ifdef USE_CUDA
+    GpuRenderer* gpu_renderer = nullptr;
+    
+    
+    if (use_gpu) gpu_renderer = new GpuRenderer(W, H);
+    else 
+    #endif
+    cpu_renderer = new CpuRenderer(W, H);
+
+    
+    if (live_mode) {
+        Display window(W, H, "Eshi Live Preview");
+        float time = 0.0f;
+        
+        while (window.isOpen()) {
+            int stride;
+            uint8_t* pixels = window.get_pixel_buffer(stride);
             
-            for (int i = 0; i < FRAMES; ++i) {
-                float time = (float)i / (float)FPS;
-                int stride;
-                uint8_t* pixels = video.get_pixel_buffer(stride);
-                gpu.renderFrame(pixels, stride, time);
-                video.submit_frame();
-            }
-        #else
-            printf("Error: GPU mode requested but engine was compiled without CUDA.\n");
-            return 1;
-        #endif
+            #ifdef USE_CUDA
+            if (use_gpu && gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
+            else 
+            #endif
+            if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
+            
+            window.submit_frame();
+            time += 1.0f / 60.0f; 
+        }
+
     } else {
-        printf("--- STARTING CPU RENDER ---\n");
-        CpuRenderer cpu(W, H);
+        
+        const int FRAMES = 240;
+        SimpleEncoder video(output_name.c_str(), W, H, FPS);
         
         for (int i = 0; i < FRAMES; ++i) {
             float time = (float)i / (float)FPS;
             int stride;
             uint8_t* pixels = video.get_pixel_buffer(stride);
-            cpu.renderFrame(pixels, stride, time);
+
+            #ifdef USE_CUDA
+            if (use_gpu && gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
+            else 
+            #endif
+            if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
+
             video.submit_frame();
         }
     }
 
+    
+    if (cpu_renderer) delete cpu_renderer;
+    #ifdef USE_CUDA
+    if (gpu_renderer) delete gpu_renderer;
+    #endif
+
     return 0;
 }
-/* Lambda clamping
-	*
-	* This version produces slightly off results,
-	* with integer overflow noticable in macOS espcially.
-	*
-	* #pragma omp parallel for
-        for (int y = 0; y < H; ++y) {
-            for (int x = 0; x < W; ++x) {
-                
-                vec4 color;
-                vec2 fragCoord((float)x, (float)y);
-                
-                // CALL THE FUNCTION FROM shader.cpp
-                mainImage(color, fragCoord, iResolution, time);
-
-                // Write to buffer
-                int idx = y * stride + x * 3;
-
-		auto clamp_u8 = [](float v) {
-		    if (v < 0.0f) v = 0.0f;
-		    if (v > 1.0f) v = 1.0f;
-		    return (uint8_t)(v * 255.0f);
-		};
-                pixels[idx + 0] = (uint8_t)(color.x * 255.0f);
-                pixels[idx + 1] = (uint8_t)(color.y * 255.0f);
-                pixels[idx + 2] = (uint8_t)(color.z * 255.0f);
-            }
-        }
-	*
-	*/
-
-
-

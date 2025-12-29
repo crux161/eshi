@@ -2,6 +2,16 @@ resources/compat/
 build/
 renderer
 main
+update_thumbnails.sh
+clean.py
 *.mp4
 *.o
 *.DS_Store
+build/
+*.o
+*.exe
+*.gif
+logs/
+*.log
+.DS_Store
+eshi
