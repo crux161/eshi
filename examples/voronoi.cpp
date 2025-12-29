@@ -15,7 +15,7 @@ inline vec2 hash2(vec2 p) {
                 s.y * 43758.5453f - floorf(s.y * 43758.5453f));
 }
 
-void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     vec2 uv = fragCoord / iResolution.y;
     
     // Scale up to make a grid

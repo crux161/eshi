@@ -6,7 +6,7 @@
 // fragCoord: Current pixel position (x,y)
 // iResolution: Canvas size (w,h)
 // iTime: Time in seconds
-void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     
     vec2 r = iResolution;
     float t = iTime * 2.0f * M_PI; // Your specific time scaling

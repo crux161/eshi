@@ -1,15 +1,13 @@
 #include "glsl_core.h"
 #include <math.h>
 
-inline float fract(float x) { return x - floorf(x); }
-inline vec2 fract(vec2 v) { return vec2(v.x - floorf(v.x), v.y - floorf(v.y)); }
 
 inline float hash(vec2 p) {
     p = vec2(dot(p, vec2(127.1f, 311.7f)), dot(p, vec2(269.5f, 183.3f)));
     return fract(sinf(p.x) * 43758.5453f);
 }
 
-void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     vec2 uv = fragCoord / iResolution.y;
     
     // Background Color
