@@ -4,12 +4,34 @@
 #include "glsl_core.h"
 #include "renderer_gpu.h" 
 
+__device__ Sampler2D iChannel0;
+
 namespace gpu {
 	#ifndef SHADER_PATH
 	    #include "shader.cpp"
 	#else
 	    #include SHADER_PATH
 	#endif
+}
+
+void uploadTextureToGPU(int w, int h, vec4* host_data) {
+    vec4* d_data;
+    size_t size = w * h * sizeof(vec4);
+    
+    
+    cudaMalloc(&d_data, size);
+    cudaMemcpy(d_data, host_data, size, cudaMemcpyHostToDevice);
+    
+    
+    Sampler2D temp;
+    temp.w = w;
+    temp.h = h;
+    temp.data = d_data;
+    
+    
+    cudaMemcpyToSymbol(iChannel0, &temp, sizeof(Sampler2D));
+    
+    printf("GPU: Texture uploaded (%dx%d)\n", w, h);
 }
 
 __global__ void renderKernel(uchar3* output, int width, int height, float time) {

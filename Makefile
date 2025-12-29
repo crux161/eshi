@@ -125,6 +125,7 @@ endif
 
 clean:
 	$(RM_CMD) $(BUILD_DIR) *.o *.mp4
+	$(RM_CMD) *.o *.mp4
 	$(RM_CMD) $(LOG_DIR)
 
 .PHONY: all clean examples print_status

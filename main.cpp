@@ -1,3 +1,6 @@
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 #include "glsl_core.h"
 #include "encoder.h"
 #include "renderer_cpu.h" 
@@ -10,6 +13,8 @@
 #ifdef USE_CUDA
     #include "renderer_gpu.h"
 #endif
+
+Sampler2D iChannel0 = {0, 0, nullptr};
 
 std::string get_filename(std::string path) {
     const size_t last_slash_idx = path.find_last_of("\\/");
@@ -58,6 +63,39 @@ int main(int argc, char** argv) {
                 }
             }
         }
+    }
+
+    
+    
+    const char* texPath = "texture.jpg"; 
+    int tw, th, tn;
+    float* texData = stbi_loadf(texPath, &tw, &th, &tn, 4); 
+    
+    if (texData) {
+        printf("Texture loaded: %s [%dx%d]\n", texPath, tw, th);
+        
+        
+        
+        vec4* vecData = new vec4[tw * th];
+        for (int i = 0; i < tw * th; i++) {
+            vecData[i] = vec4(texData[i*4+0], texData[i*4+1], texData[i*4+2], texData[i*4+3]);
+        }
+        
+        
+        iChannel0.w = tw;
+        iChannel0.h = th;
+        iChannel0.data = vecData; 
+        
+        
+        #ifdef USE_CUDA
+        if (use_gpu) {
+            uploadTextureToGPU(tw, th, vecData);
+        }
+        #endif
+        
+        stbi_image_free(texData);
+    } else {
+        printf("⚠️ No texture found at %s. iChannel0 will be empty.\n", texPath);
     }
 
     printf("Initializing Engine...\n");
