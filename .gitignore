@@ -8,9 +8,11 @@
 *.dll
 win_env.bat
 restore_deps.bat
+update_thumbnails.sh
 clean.bat
 clean.py
 *.bak
+*.o
 
 # vcpkg
 vcpkg_installed/
