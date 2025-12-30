@@ -33,7 +33,9 @@ ___
 
 ### 🛠️ Build & Dependencies
 
-**1. System Libraries (Debian/Ubuntu):**
+#### 🐧 Linux (Debian/Ubuntu)
+
+**1. System Libraries:**
 ```bash
 # Core Dependencies
 sudo apt install pkg-config libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libomp-dev libsdl2-dev
@@ -49,15 +51,37 @@ sudo apt update && sudo apt install gum
 ```bash
 make -j$(nproc)
 ```
-
 *(Note: If `nvcc` is found in your PATH, Eshi automatically compiles with CUDA support.)*
+
+#### 🪟 Windows (x64)
+
+**1. Prerequisites:**
+* **Visual Studio** (MSVC C++ Compiler)
+* **CUDA Toolkit** (Must be installed and `nvcc` reachable)
+* **[vcpkg](https://vcpkg.io/)** package manager
+
+**2. Install Dependencies:**
+Open a terminal in the project root and run:
+```powershell
+vcpkg install --triplet x64-windows
+```
+*This uses `vcpkg.json` to install SDL2 and FFmpeg into a local `vcpkg_installed` folder.*
+
+**3. Configure & Compile:**
+1.  Open `build_all.bat` in a text editor.
+2.  Update the `VCPKG_ROOT` and `CUDA_PATH` variables to match your installation paths.
+3.  Run the build script:
+    ```cmd
+    build_all.bat
+    ```
+4.  Executables will be generated in the `build/` directory.
 
 ___
 
 ### 🚀 Usage
 
 #### 1. The Interactive Dashboard (Recommended)
-The easiest way to run demos is with the beautified shell script:
+The easiest way to run demos is with the beautified shell script (Linux/WSL only currently):
 ```bash
 ./run_demos.sh
 ```
@@ -68,7 +92,11 @@ You can also run the built binaries directly from the `build/` folder:
 
 **Render to Video:**
 ```bash
+# Linux
 ./build/deepsea
+# Windows
+.\build\deepsea.exe
+
 # Output: deepsea.mp4 (in build/)
 ```
 
@@ -95,7 +123,7 @@ void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
 }
 ```
 
-Rebuild with `make` to update the binary.
+Rebuild to update the binary.
 
 ___
 
