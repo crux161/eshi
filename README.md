@@ -18,16 +18,17 @@ ___
 ### 🎨 Origins & Credits
 This project is heavily inspired by and builds upon the foundational concepts of **[Tzozen's](https://github.com/rexim/)** **[checker.c](https://gist.github.com/rexim/ef86bf70918034a5a57881456c0a0ccf)**.
 
-Eshi evolves this concept by embedding the encoding pipeline directly into the application, supporting multi-threaded CPU rendering (OpenMP), GPU acceleration (CUDA), and live previews (SDL2).
+Eshi evolves this concept by embedding the encoding pipeline directly into the application, supporting multi-threaded CPU rendering (OpenMP), GPU acceleration (CUDA & OpenGL), and live previews (SDL2).
 
 ___
 
 ### ✨ Features
-* **Hybrid Rendering:** Seamlessly switch between **CPU (OpenMP)** and **GPU (CUDA)** rendering engines.
+* **Hybrid Rendering:** Seamlessly switch between **CPU (OpenMP)**, **GPU (CUDA)**, and **GPU (OpenGL)** rendering engines.
 * **Live Preview:** Tweak your shaders in real-time with an SDL2 window (`--live`).
 * **Zero-IO Video:** Renders directly to H.264 (`.mp4`) in memory using linked FFmpeg libraries.
 * **Modern CLI:** Beautiful terminal UI powered by [Gum](https://github.com/charmbracelet/gum).
 * **C++ Shaders:** A robust math library (`glsl_core.h`) that emulates GLSL types (`vec2`, `vec4`) and intrinsics in standard C++.
+* **Arm64 Support:** Native compilation and hardware acceleration on Windows on Arm (Snapdragon) devices.
 
 ___
 
@@ -65,16 +66,33 @@ Open a terminal in the project root and run:
 ```powershell
 vcpkg install --triplet x64-windows
 ```
-*This uses `vcpkg.json` to install SDL2 and FFmpeg into a local `vcpkg_installed` folder.*
 
 **3. Configure & Compile:**
 1.  Open `build_all.bat` in a text editor.
-2.  Update the `VCPKG_ROOT` and `CUDA_PATH` variables to match your installation paths.
+2.  Update `VCPKG_ROOT` and `CUDA_PATH` variables.
+3.  Run `build_all.bat`.
+
+#### 🐲 Windows (Arm64 / Snapdragon)
+
+**1. Prerequisites:**
+* **Visual Studio 2022** (Ensure "ARM64 build tools" are installed)
+* **[vcpkg](https://vcpkg.io/)** package manager
+* **OpenCL™ and OpenGL® Compatibility Pack** (Install from Microsoft Store to enable Adreno GPU support)
+
+**2. Install Dependencies:**
+Open a terminal in the project root and run:
+```powershell
+vcpkg install --triplet arm64-windows
+```
+
+**3. Configure & Compile:**
+1.  Open the **ARM64 Native Tools Command Prompt** for VS 2022.
+2.  Open `build.arm64.bat` and update `VCPKG_ROOT`.
 3.  Run the build script:
     ```cmd
-    build_all.bat
+    build.arm64.bat
     ```
-4.  Executables will be generated in the `build/` directory.
+4.  Executables will be generated in `build/`.
 
 ___
 
@@ -107,7 +125,7 @@ You can also run the built binaries directly from the `build/` folder:
 ```
 
 **Options:**
-* `--gpu`: Use CUDA rendering engine (if compiled).
+* `--gpu`: Use hardware acceleration (CUDA on x64, OpenGL on Arm64).
 * `--live`: Render to window instead of file.
 * `--res WxH`: Set resolution (e.g., `--res 1920x1080`). Default is 960x540.
 
