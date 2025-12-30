@@ -2,11 +2,11 @@
 
 **A high-performance, hybrid CPU/GPU shader engine and video generator.**
 
-### 🖼️ Gallery
 <p align="center">
 <b>Warp</b><br><img src="https://github.com/crux161/eshi/blob/main/resources/warp.gif?raw=true" style="border: 1px solid white;" alt="warp" />
 </p>
 
+### 🖼️ Showcase
 ||||
 |:---:|:---:|:---:|
 | **Deep Sea**<br>![Deep Sea](resources/deepsea.gif) | **Fractal**<br>![Fractal](resources/fractal.gif) | **Polar**<br>![Polar](resources/polar.gif) |
