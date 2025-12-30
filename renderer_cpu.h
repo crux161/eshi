@@ -3,12 +3,14 @@
 #include <omp.h>
 #include <algorithm> 
 
+using namespace glsl;
 
 #ifndef LINK_SHADER
     #include "shader.cpp"
 #else
     void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime);
 #endif
+
 
 class CpuRenderer {
     int width, height;

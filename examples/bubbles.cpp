@@ -1,5 +1,7 @@
-#include "glsl_core.h"
+#include "../glsl_core.h"
 #include <math.h>
+
+using namespace glsl;
 
 SHADER_CTX inline float hash(vec2 p) {
     p = vec2(dot(p, vec2(127.1f, 311.7f)), dot(p, vec2(269.5f, 183.3f)));

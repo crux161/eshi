@@ -14,6 +14,8 @@
     #include "renderer_gpu.h"
 #endif
 
+using namespace glsl;
+
 Sampler2D iChannel0 = {0, 0, nullptr};
 
 std::string get_filename(std::string path) {

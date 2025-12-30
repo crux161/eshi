@@ -8,7 +8,7 @@ if [ ! -d "build" ]; then
 fi
 cd build || exit 1
 
-DEMOS=("deepsea" "neon" "bubbles" "fractal" "polar" "raymarch" "ripple" "starfield" "tzozen" "voronoi")
+DEMOS=("deepsea" "neon" "warp" "bubbles" "fractal" "polar" "raymarch" "ripple" "starfield" "tzozen" "voronoi")
 TOTAL_FRAMES_PER_DEMO=240
 TOTAL_DEMOS=${#DEMOS[@]}
 ARGS=""

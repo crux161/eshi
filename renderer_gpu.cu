@@ -4,6 +4,8 @@
 #include "glsl_core.h"
 #include "renderer_gpu.h" 
 
+using namespace glsl;
+
 __device__ Sampler2D iChannel0;
 
 namespace gpu {

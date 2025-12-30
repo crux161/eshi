@@ -1,5 +1,7 @@
-#include "glsl_core.h"
+#include ".//glsl_core.h"
 #include <math.h>
+
+using namespace glsl;
 
 SHADER_CTX inline float dot3(vec4 a, vec4 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
 SHADER_CTX inline float length3(vec4 v) { return sqrtf(dot3(v, v)); }

@@ -1,6 +1,7 @@
-#include "glsl_core.h"
+#include "../glsl_core.h"
 #include <math.h>
 
+using namespace glsl;
 
 SHADER_CTX inline float hash(float n) {  
     float s = sinf(n) * 43758.5453123f;

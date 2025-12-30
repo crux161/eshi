@@ -1,17 +1,54 @@
-resources/compat/
-build/
-renderer
-main
-update_thumbnails.sh
-clean.py
-*.mp4
-*.o
-*.DS_Store
-build/
-*.o
+# --- Build Artifacts (Windows) ---
 *.exe
-*.gif
-logs/
-*.log
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.dll
+win_env.bat
+restore_deps.bat
+clean.bat
+clean.py
+*.bak
+
+# vcpkg
+vcpkg_installed/
+vcpkg/
+
+
+# --- CUDA Intermediate Files ---
+# These are the weird "tmpxft" files you saw in the logs
+*.cudafe*
+*.fatbin*
+*.ptx
+*.cubin
+tmpxft_*
+*.i
+*.ii
+*.gpu
+
+# --- Directories ---
+build/
+bin/
+x64/
+Debug/
+Release/
+
+# --- IDE / Editor Settings ---
+.vs/
+.vscode/
+*.user
+*.suo
+
+# --- Output Media (Don't commit 100MB videos!) ---
+*.mp4
+*.avi
+*.png
+*.jpg
+# Exception: Uncomment the next line if you want to keep texture assets
+# !texture.jpg
+
+# --- OS Junk ---
+Thumbs.db
 .DS_Store
-eshi

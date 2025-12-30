@@ -1,7 +1,7 @@
-#include "glsl_core.h"
+#include "../glsl_core.h"
 #include <math.h>
 
-
+using namespace glsl;
 
 SHADER_CTX inline vec2 hash2(vec2 p) {  
     

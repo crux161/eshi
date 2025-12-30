@@ -1,8 +1,9 @@
 #pragma once
 #include <stdint.h>
 
+#include "glsl_core.h"
 
-struct vec4; 
+using namespace glsl;
 
 class GpuRenderer {
 public:

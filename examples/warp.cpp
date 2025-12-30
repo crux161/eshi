@@ -1,8 +1,13 @@
-#include "glsl_core.h"
+#include "../glsl_core.h"
 #include <math.h>
 
-extern SHADER_CTX Sampler2D iChannel0;
+using namespace glsl;
 
+#ifdef __CUDACC__
+    extern __managed__ Sampler2D iChannel0;
+#else
+    extern Sampler2D iChannel0;
+#endif
 
 SHADER_CTX inline float dot3(vec4 a, vec4 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
 

@@ -1,7 +1,7 @@
-#include "glsl_core.h"
+#include "../glsl_core.h"
 #include <math.h>
 
-
+using namespace glsl;
 
 SHADER_CTX vec4 palette(float t) {
     vec4 a = vec4(0.5f, 0.5f, 0.5f, 0.0f);

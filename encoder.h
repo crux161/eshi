@@ -11,9 +11,6 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-
-
-
 class SimpleEncoder {
     int width, height, fps, frame_idx;
     AVFormatContext *fmt_ctx = NULL;
@@ -57,18 +54,15 @@ public:
         stream = avformat_new_stream(fmt_ctx, codec);
         c_ctx = avcodec_alloc_context3(codec);
         c_ctx->width = width; c_ctx->height = height;
-        c_ctx->time_base = (AVRational){1, fps};
-        c_ctx->framerate = (AVRational){fps, 1};
+
+        
+        c_ctx->time_base = AVRational{1, fps};
+        c_ctx->framerate = AVRational{fps, 1};
+        
         c_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-        
-	
-        
-        
-        
         
         int64_t target_bitrate = (int64_t)width * height * fps * 0.25; 
         c_ctx->bit_rate = target_bitrate;
-        
         
         c_ctx->rc_max_rate = target_bitrate * 1.5;
         c_ctx->rc_buffer_size = target_bitrate;
