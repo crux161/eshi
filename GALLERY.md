@@ -12,5 +12,7 @@ A collection of examples built with the ESHI framework. All examples run in real
 | <img src="resources/raymarch.gif" width="300"> | **Raymarch** | Basic raymarching setup with soft shadows and ambient occlusion. |
 | <img src="resources/voronoi.gif" width="300"> | **Voronoi** | Cellular noise patterns used for organic textures. |
 | <img src="resources/starfield.gif" width="300"> | **Starfield** | 3D projection of points simulating high-speed space travel. |
+| <img src="resources/ripple.gif" width="300"> | **Ripple** | Look at the pretty colors Duke! |
+
 
 ---
