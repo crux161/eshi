@@ -1,3 +1,12 @@
+
+
+
+
+
+
+CUDA_PATH_LINUX ?= /usr/local/cuda
+
+
 ifeq ($(OS),Windows_NT)
     detected_OS := Windows
 else
@@ -13,6 +22,7 @@ EXE_EXT   =
 RM_CMD    = rm -rf
 NVCC_FLAGS = -O3 -I.
 
+
 NVCC_PATH := $(shell which nvcc 2>/dev/null)
 ifeq ($(NVCC_PATH),)
     ifdef CUDA_PATH
@@ -27,8 +37,9 @@ ifneq ($(NVCC_PATH),)
     LDFLAGS_CUDA = -lcudart
 
     ifeq ($(detected_OS),Linux)
-        LDFLAGS_CUDA += -L/usr/local/cuda/lib64
-        CXXFLAGS += -I/usr/local/cuda/include
+
+        LDFLAGS_CUDA += -L$(CUDA_PATH_LINUX)/lib64 -L/opt/cuda/lib
+        CXXFLAGS += -I$(CUDA_PATH_LINUX)/include
     endif
     ifeq ($(detected_OS),Windows)
         LDFLAGS_CUDA += -L"$(CUDA_PATH)/lib/x64"
@@ -41,7 +52,6 @@ else
 endif
 
 ifeq ($(detected_OS),Windows)
-
     FFMPEG_PATH := C:\ProgramData\chocolatey\lib\ffmpeg-shared\tools\ffmpeg-8.0.1-full_build-shared
     LDFLAGS_EXTRA = -L"$(FFMPEG_PATH)\lib"
     EXE_EXT = .exe
@@ -66,7 +76,6 @@ EXAMPLE_SRCS := $(wildcard examples/*.cpp)
 EXAMPLE_BINS := $(patsubst examples/%.cpp, $(BUILD_DIR)/%$(EXE_EXT), $(EXAMPLE_SRCS))
 
 
-
 all: print_status $(BUILD_DIR)/eshi$(EXE_EXT) examples
 
 print_status:
@@ -74,7 +83,6 @@ print_status:
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
-
 
 
 ifeq ($(USE_GPU),1)
@@ -89,7 +97,6 @@ $(BUILD_DIR)/eshi$(EXE_EXT): $(ESHI_DEPS) | $(BUILD_DIR)
 examples: $(EXAMPLE_BINS)
 
 
-
 main.o: main.cpp glsl_core.h encoder.h renderer_cpu.h
 	$(CXX) $(CXXFLAGS) -c main.cpp -o main.o
 
@@ -99,8 +106,6 @@ shader.o: shader.cpp glsl_core.h
 
 renderer_gpu.o: renderer_gpu.cu glsl_core.h renderer_gpu.h
 	nvcc $(NVCC_FLAGS) -DSHADER_PATH='"shader.cpp"' -c renderer_gpu.cu -o renderer_gpu.o
-
-
 
 
 $(BUILD_DIR)/%.o: examples/%.cpp glsl_core.h | $(BUILD_DIR)

@@ -17,7 +17,7 @@ struct vec2 {
     SHADER_CTX vec2() : x(0), y(0) {}
     SHADER_CTX vec2(float _x, float _y) : x(_x), y(_y) {}
     
-    // Added explicit single-float constructor
+    
     SHADER_CTX explicit vec2(float v) : x(v), y(v) {}
     
     SHADER_CTX vec2 yx() const { return vec2(y,x); } 

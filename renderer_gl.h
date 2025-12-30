@@ -7,7 +7,7 @@
 #include <iostream>
 #include <sys/stat.h>
 
-// --- Minimal OpenGL Extension Loader for Windows ---
+
 typedef char GLchar;
 typedef ptrdiff_t GLsizeiptr;
 
@@ -70,7 +70,7 @@ class GlRenderer {
     GLuint vbo, vao;
     GLuint user_texture = 0;
     
-    // Function Pointers
+    
     PFNGLGENBUFFERS glGenBuffers = nullptr;
     PFNGLBINDBUFFER glBindBuffer = nullptr;
     PFNGLBUFFERDATA glBufferData = nullptr;
@@ -145,7 +145,7 @@ class GlRenderer {
         std::string up = "../" + path;
         if (stat(up.c_str(), &buffer) == 0) return up;
         
-        // Handle running from root where path is "../examples/..."
+        
         if (path.substr(0, 3) == "../") {
             std::string stripped = path.substr(3);
             if (stat(stripped.c_str(), &buffer) == 0) return stripped;
@@ -173,21 +173,21 @@ class GlRenderer {
         std::ifstream f(cleanPath);
         std::string content, line;
         while(std::getline(f, line)) {
-            // Filter C++isms
+            
             if(line.find("#include") != std::string::npos) continue;
             if(line.find("#pragma") != std::string::npos) continue;
             if(line.find("using namespace") != std::string::npos) continue;
             if(line.find("extern") != std::string::npos) continue; 
             
-            // Cleanup
+            
             line = replaceAll(line, "inline ", "");
             line = replaceAll(line, "vec4 &fragColor", "out vec4 fragColor");
             line = replaceAll(line, "vec4 &", "out vec4 ");
             
-            // Fix Warp: Remove texture check
+            
             line = replaceAll(line, "if (iChannel0.data == nullptr)", "if (false)");
 
-            // Fix Swizzles with parenthesis
+            
             line = replaceAll(line, ".xyyx()", ".xyyx");
             line = replaceAll(line, ".xyz()", ".xyz");
             line = replaceAll(line, ".xy()", ".xy");

@@ -10,16 +10,20 @@
     #include "renderer_gl.h"
 #endif
 
+#ifdef USE_CUDA
+    #include "renderer_gpu.h"
+#endif
+
 #include <string>
 #include <iostream>
 #include <vector>
 
 using namespace glsl;
 
-// CPU Sampler Global
+
 Sampler2D iChannel0 = {0, 0, nullptr};
 
-// Helper macro to stringify the shader path
+
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
@@ -63,17 +67,18 @@ int main(int argc, char** argv) {
         }
     }
     
-    // --- TEXTURE LOADING ---
+    
     const char* texPath = "texture.jpg"; 
     int tw=0, th=0, tn=0;
-    // Force 4 channels (RGBA) for consistency
+    
     float* texData = stbi_loadf(texPath, &tw, &th, &tn, 4); 
     
-    // Setup CPU Texture (iChannel0)
+    
+    vec4* vecData = nullptr;
     if (texData) {
         printf("Texture loaded: %s [%dx%d]\n", texPath, tw, th);
         
-        vec4* vecData = new vec4[tw * th];
+        vecData = new vec4[tw * th];
         for (int i = 0; i < tw * th; i++) {
             vecData[i] = vec4(texData[i*4+0], texData[i*4+1], texData[i*4+2], texData[i*4+3]);
         }
@@ -85,31 +90,54 @@ int main(int argc, char** argv) {
         printf("Texture not found: %s (Will use black)\n", texPath);
     }
 
-    // --- INIT RENDERERS ---
+    
     printf("Initializing Engine...\n");
     if (live_mode) printf("Mode: Live Window [%dx%d]\n", W, H);
     else           printf("Mode: File Render -> %s [%dx%d]\n", output_name.c_str(), W, H);
 
     CpuRenderer* cpu_renderer = nullptr;
+    
     #ifdef USE_OPENGL
     GlRenderer* gl_renderer = nullptr;
+    #endif
+
+    #ifdef USE_CUDA
+    GpuRenderer* gpu_renderer = nullptr;
+    #endif
     
     if (use_gpu) {
-        printf("Initializing OpenGL Renderer with source: %s\n", SHADER_PATH);
-        // Pass the loaded texture data to the GPU Renderer
-        gl_renderer = new GlRenderer(W, H, SHADER_PATH, texData, tw, th);
-    } else 
-    #endif
-    {
+        bool gpu_init = false;
+
+        #ifdef USE_CUDA
+        printf("Initializing CUDA Renderer...\n");
+        gpu_renderer = new GpuRenderer(W, H);
+        if (vecData) {
+            uploadTextureToGPU(tw, th, vecData);
+        }
+        gpu_init = true;
+        #endif
+
+        #ifdef USE_OPENGL
+        if (!gpu_init) { 
+            printf("Initializing OpenGL Renderer with source: %s\n", SHADER_PATH);
+            gl_renderer = new GlRenderer(W, H, SHADER_PATH, texData, tw, th);
+            gpu_init = true;
+        }
+        #endif
+
+        if (!gpu_init) {
+            printf("⚠️  GPU requested but no GPU backend (CUDA/OpenGL) was compiled in. Falling back to CPU.\n");
+            cpu_renderer = new CpuRenderer(W, H);
+        }
+    } else {
         printf("Initializing CPU Renderer (OpenMP)\n");
         cpu_renderer = new CpuRenderer(W, H);
     }
     
-    // Now that Renderers are init, we can free the raw STB data
-    // (CPU renderer has its own copy in vec4, GPU renderer uploaded it to VRAM)
+    
     if (texData) stbi_image_free(texData);
 
-    // --- RENDER LOOP ---
+    
     if (live_mode) {
         Display window(W, H, "Eshi Live Preview");
         float time = 0.0f;
@@ -117,6 +145,10 @@ int main(int argc, char** argv) {
             int stride;
             uint8_t* pixels = window.get_pixel_buffer(stride);
             
+            #ifdef USE_CUDA
+            if (gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
+            else 
+            #endif
             #ifdef USE_OPENGL
             if (gl_renderer) gl_renderer->renderFrame(pixels, stride, time);
             else 
@@ -135,6 +167,10 @@ int main(int argc, char** argv) {
             int stride;
             uint8_t* pixels = video.get_pixel_buffer(stride);
 
+            #ifdef USE_CUDA
+            if (gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
+            else 
+            #endif
             #ifdef USE_OPENGL
             if (gl_renderer) gl_renderer->renderFrame(pixels, stride, time);
             else 
@@ -151,6 +187,12 @@ int main(int argc, char** argv) {
     #ifdef USE_OPENGL
     if (gl_renderer) delete gl_renderer;
     #endif
+    #ifdef USE_CUDA
+    if (gpu_renderer) delete gpu_renderer;
+    #endif
+    
+    
+    if (vecData) delete[] vecData;
 
     return 0;
 }
