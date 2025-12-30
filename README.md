@@ -3,11 +3,17 @@
 **A high-performance, hybrid CPU/GPU shader engine and video generator.**
 
 ### 🖼️ Gallery
+<p align="center">
+<b>Warp</b><br><img src="https://github.com/crux161/eshi/blob/main/resources/warp.gif?raw=true" alt="warp" />
+</p>
+
 ||||
 |:---:|:---:|:---:|
 | **Deep Sea**<br>![Deep Sea](resources/deepsea.gif) | **Fractal**<br>![Fractal](resources/fractal.gif) | **Polar**<br>![Polar](resources/polar.gif) |
 | **Raymarch**<br>![Raymarch](resources/raymarch.gif) | **Ripple**<br>![Ripple](resources/ripple.gif) | **Starfield**<br>![Starfield](resources/starfield.gif) |
-| **Tzozen**<br>![Tzozen](resources/tzozen.gif) | **Voronoi**<br>![Voronoi](resources/voronoi.gif) | **Bubbles**<br>![Bubbles](resources/bubbles.gif) |
+| **Tzozen**<br>![Tzozen](resources/tzozen.gif) | **Voronoi**<br>![Voronoi](resources/voronoi.gif) | **Bubbles**<br>![Bubbles](resources/bubbles.gif) | 
+
+
 
 Eshi (Japanese for "painter" or "artist") is a minimal C++ framework that turns mathematical formulas into video. It allows you to write GLSL-style logic directly in C++, rendering procedural art to high-quality video files (`.mp4`) or a live window preview.
 
