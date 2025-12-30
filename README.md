@@ -34,7 +34,7 @@ ___
 
 ### 🛠️ Build & Dependencies
 
-#### 🐧 Linux (Debian/Ubuntu)
+#### 🐧 Linux (Debian/Ubuntu/Arch)
 
 **1. System Libraries:**
 ```bash
@@ -53,6 +53,15 @@ sudo apt update && sudo apt install gum
 make -j$(nproc)
 ```
 *(Note: If `nvcc` is found in your PATH, Eshi automatically compiles with CUDA support.)*
+
+**Troubleshooting CUDA Paths:**
+If the build fails with `/usr/bin/ld: cannot find -lcudart`, your CUDA installation may be in a non-standard location (common on Arch/CachyOS).
+You can fix this by editing the `CUDA_PATH_LINUX` variable at the top of the `Makefile`, or by passing it directly to `make`:
+
+```bash
+# Example for Arch Linux / CachyOS
+make CUDA_PATH_LINUX=/opt/cuda -j$(nproc)
+```
 
 #### 🪟 Windows (x64)
 
