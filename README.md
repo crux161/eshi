@@ -4,7 +4,7 @@
 
 ### 🖼️ Gallery
 <p align="center">
-<b>Warp</b><br><img src="https://github.com/crux161/eshi/blob/main/resources/warp.gif?raw=true" alt="warp" />
+<b>Warp</b><br><img src="https://github.com/crux161/eshi/blob/main/resources/warp.gif?raw=true" style="border: 1px solid white;" alt="warp" />
 </p>
 
 ||||
