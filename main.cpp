@@ -6,17 +6,22 @@
 #include "renderer_cpu.h" 
 #include "display.h" 
 
+#ifdef USE_OPENGL
+    #include "renderer_gl.h"
+#endif
+
 #include <string>
 #include <iostream>
 #include <vector>
 
-#ifdef USE_CUDA
-    #include "renderer_gpu.h"
-#endif
-
 using namespace glsl;
 
+// CPU Sampler Global
 Sampler2D iChannel0 = {0, 0, nullptr};
+
+// Helper macro to stringify the shader path
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
 
 std::string get_filename(std::string path) {
     const size_t last_slash_idx = path.find_last_of("\\/");
@@ -27,30 +32,23 @@ std::string get_filename(std::string path) {
 }
 
 int main(int argc, char** argv) {
-    
     int W = 960; 
     int H = 540;
     const int FPS = 60;
-    
     
     bool use_gpu = false;
     bool live_mode = false;
     std::string output_name = "output.mp4";
 
-    
     if (argc > 0) {
         std::string bin_name = get_filename(argv[0]);
         if (!bin_name.empty()) output_name = bin_name + ".mp4";
     }
 
-    
     for(int i=1; i<argc; i++){
         std::string arg = argv[i];
-        
         if(arg == "--gpu")  use_gpu = true;
         if(arg == "--live") live_mode = true;
-        
-        
         if(arg == "--res") {
             if (i + 1 < argc) {
                 std::string res_str = argv[++i]; 
@@ -59,73 +57,68 @@ int main(int argc, char** argv) {
                     try {
                         W = std::stoi(res_str.substr(0, x_pos));
                         H = std::stoi(res_str.substr(x_pos + 1));
-                    } catch (...) {
-                        fprintf(stderr, "Invalid resolution format. Use WIDTHxHEIGHT (e.g. 1280x720)\n");
-                    }
+                    } catch (...) {}
                 }
             }
         }
     }
-
     
-    
+    // --- TEXTURE LOADING ---
     const char* texPath = "texture.jpg"; 
-    int tw, th, tn;
+    int tw=0, th=0, tn=0;
+    // Force 4 channels (RGBA) for consistency
     float* texData = stbi_loadf(texPath, &tw, &th, &tn, 4); 
     
+    // Setup CPU Texture (iChannel0)
     if (texData) {
         printf("Texture loaded: %s [%dx%d]\n", texPath, tw, th);
-        
-        
         
         vec4* vecData = new vec4[tw * th];
         for (int i = 0; i < tw * th; i++) {
             vecData[i] = vec4(texData[i*4+0], texData[i*4+1], texData[i*4+2], texData[i*4+3]);
         }
         
-        
         iChannel0.w = tw;
         iChannel0.h = th;
         iChannel0.data = vecData; 
-        
-        
-        #ifdef USE_CUDA
-        if (use_gpu) {
-            uploadTextureToGPU(tw, th, vecData);
-        }
-        #endif
-        
-        stbi_image_free(texData);
     } else {
-        printf("⚠️ No texture found at %s. iChannel0 will be empty.\n", texPath);
+        printf("Texture not found: %s (Will use black)\n", texPath);
     }
 
+    // --- INIT RENDERERS ---
     printf("Initializing Engine...\n");
     if (live_mode) printf("Mode: Live Window [%dx%d]\n", W, H);
     else           printf("Mode: File Render -> %s [%dx%d]\n", output_name.c_str(), W, H);
 
-    
     CpuRenderer* cpu_renderer = nullptr;
-    #ifdef USE_CUDA
-    GpuRenderer* gpu_renderer = nullptr;
+    #ifdef USE_OPENGL
+    GlRenderer* gl_renderer = nullptr;
     
-    
-    if (use_gpu) gpu_renderer = new GpuRenderer(W, H);
-    else 
+    if (use_gpu) {
+        printf("Initializing OpenGL Renderer with source: %s\n", SHADER_PATH);
+        // Pass the loaded texture data to the GPU Renderer
+        gl_renderer = new GlRenderer(W, H, SHADER_PATH, texData, tw, th);
+    } else 
     #endif
-    cpu_renderer = new CpuRenderer(W, H);
-
+    {
+        printf("Initializing CPU Renderer (OpenMP)\n");
+        cpu_renderer = new CpuRenderer(W, H);
+    }
     
+    // Now that Renderers are init, we can free the raw STB data
+    // (CPU renderer has its own copy in vec4, GPU renderer uploaded it to VRAM)
+    if (texData) stbi_image_free(texData);
+
+    // --- RENDER LOOP ---
     if (live_mode) {
         Display window(W, H, "Eshi Live Preview");
         float time = 0.0f;
-        
         while (window.isOpen()) {
             int stride;
             uint8_t* pixels = window.get_pixel_buffer(stride);
             
-            #ifdef USE_CUDA
-            if (use_gpu && gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
+            #ifdef USE_OPENGL
+            if (gl_renderer) gl_renderer->renderFrame(pixels, stride, time);
             else 
             #endif
             if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
@@ -133,9 +126,7 @@ int main(int argc, char** argv) {
             window.submit_frame();
             time += 1.0f / 60.0f; 
         }
-
     } else {
-        
         const int FRAMES = 240;
         SimpleEncoder video(output_name.c_str(), W, H, FPS);
         
@@ -144,20 +135,21 @@ int main(int argc, char** argv) {
             int stride;
             uint8_t* pixels = video.get_pixel_buffer(stride);
 
-            #ifdef USE_CUDA
-            if (use_gpu && gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
+            #ifdef USE_OPENGL
+            if (gl_renderer) gl_renderer->renderFrame(pixels, stride, time);
             else 
             #endif
             if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
 
             video.submit_frame();
+            if(i%30==0) printf(".");
         }
+        printf("\nDone.\n");
     }
 
-    
     if (cpu_renderer) delete cpu_renderer;
-    #ifdef USE_CUDA
-    if (gpu_renderer) delete gpu_renderer;
+    #ifdef USE_OPENGL
+    if (gl_renderer) delete gl_renderer;
     #endif
 
     return 0;

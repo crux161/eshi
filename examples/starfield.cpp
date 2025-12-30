@@ -16,7 +16,7 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
     for(int layer=0; layer<4; layer++) {
         
         
-        float flayer = (float)layer;
+        float flayer = float(layer);
         float speed = 0.5f + flayer * 0.2f;
         float size = 10.0f + flayer * 5.0f;
         float shift = flayer * 135.2f;
@@ -28,7 +28,7 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
         
         
         for(int i=0; i<10; i++) {
-            float seed = (float)i + shift + gridIndex * 13.37f;
+            float seed = float(i) + shift + gridIndex * 13.37f;
             vec2 pos = vec2(hash(seed) - 0.5f, hash(seed + 1.2f) - 0.5f);
             
             

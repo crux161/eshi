@@ -30,7 +30,7 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
     
     for (int y= -1; y <= 1; y++) {
         for (int x= -1; x <= 1; x++) {
-            vec2 neighbor = vec2((float)x, (float)y);
+            vec2 neighbor = vec2(float(x), float(y));
             
             
             vec2 point = hash2(i_st + neighbor);

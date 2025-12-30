@@ -9,9 +9,16 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
     float t = iTime * 2.0f * M_PI; 
 
     vec2 p = (fragCoord * 2.0f - r) / r.y;
-    vec2 l, i, v = p * (l += 4.0f - 4.0f * abs(0.7f - dot(p, p)));
     
-    vec4 o;
+    // FIX: Initialize l and i explicitly to 0.0 for GLSL
+    vec2 l = vec2(0.0f);
+    vec2 i = vec2(0.0f);
+    
+    // Now calculate v using the initialized l
+    vec2 v = p * (l += 4.0f - 4.0f * abs(0.7f - dot(p, p)));
+    
+    vec4 o = vec4(0.0f); // Initialize o explicitly too, just to be safe
+    
     for(; i.y++ < 8.0f; o += (sin(v.xyyx()) + 1.0f) * abs(v.x - v.y)) {
         v += cos(v.yx() * i.y + i + t) / i.y + 0.7f;
     }

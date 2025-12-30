@@ -17,6 +17,9 @@ struct vec2 {
     SHADER_CTX vec2() : x(0), y(0) {}
     SHADER_CTX vec2(float _x, float _y) : x(_x), y(_y) {}
     
+    // Added explicit single-float constructor
+    SHADER_CTX explicit vec2(float v) : x(v), y(v) {}
+    
     SHADER_CTX vec2 yx() const { return vec2(y,x); } 
     SHADER_CTX vec4 xyyx() const; 
 };
@@ -34,8 +37,6 @@ struct vec4 {
 
 
 SHADER_CTX inline vec4 vec2::xyyx() const { return vec4(x, y, y, x); }
-
-
 
 SHADER_CTX inline vec2 operator *(const vec2 &a, float s) { return vec2(a.x*s, a.y*s); }
 SHADER_CTX inline vec2 operator +(const vec2 &a, float s) { return vec2(a.x+s, a.y+s); }
@@ -63,16 +64,12 @@ SHADER_CTX inline vec4 operator /(const vec4 &a, const vec4 &b) { return vec4(a.
 SHADER_CTX inline vec4 &operator +=(vec4 &a, const vec4 &b) { a = a + b; return a; }
 SHADER_CTX inline vec4 &operator +=(vec4 &a, float s) { a = a + s; return a; }
 
-
-
 SHADER_CTX inline vec4 sin(const vec4 &a) { return vec4(sinf(a.x), sinf(a.y), sinf(a.z), sinf(a.w)); } 
 SHADER_CTX inline vec4 cos(const vec4 &a) { return vec4(cosf(a.x), cosf(a.y), cosf(a.z), cosf(a.w)); } 
 SHADER_CTX inline vec4 exp(const vec4 &a) { return vec4(expf(a.x), expf(a.y), expf(a.z), expf(a.w)); } 
 SHADER_CTX inline vec4 tanh(const vec4 &a) { return vec4(tanhf(a.x), tanhf(a.y), tanhf(a.z), tanhf(a.w)); } 
 
 SHADER_CTX inline float dot(const vec2 &a, const vec2 &b) { return a.x*b.x + a.y*b.y; }
-
-
 
 SHADER_CTX inline vec2 abs(const vec2 &a) { return vec2(fabsf(a.x), fabsf(a.y)); } 
 
