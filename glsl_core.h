@@ -11,7 +11,6 @@
 
 namespace glsl {
 
-    // --- Import Standard Scalars ---
     using std::abs;
     using std::min;
     using std::max;
@@ -37,6 +36,10 @@ namespace glsl {
         SHADER_CTX vec2(float v) : x(v), y(v) {}
         SHADER_CTX vec2(float _x, float _y) : x(_x), y(_y) {}
         
+        // Array Access
+        SHADER_CTX float& operator[](int i) { return (&x)[i]; }
+        SHADER_CTX const float& operator[](int i) const { return (&x)[i]; }
+        
         SHADER_CTX vec2 operator+(const vec2& r) const { return vec2(x+r.x, y+r.y); }
         SHADER_CTX vec2 operator-(const vec2& r) const { return vec2(x-r.x, y-r.y); }
         SHADER_CTX vec2 operator*(float s) const { return vec2(x*s, y*s); }
@@ -59,6 +62,10 @@ namespace glsl {
         SHADER_CTX vec3(float v) : x(v), y(v), z(v) {}
         SHADER_CTX vec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
         
+        // Array Access
+        SHADER_CTX float& operator[](int i) { return (&x)[i]; }
+        SHADER_CTX const float& operator[](int i) const { return (&x)[i]; }
+
         SHADER_CTX vec3 operator+(const vec3& r) const { return vec3(x+r.x, y+r.y, z+r.z); }
         SHADER_CTX vec3 operator-(const vec3& r) const { return vec3(x-r.x, y-r.y, z-r.z); }
         SHADER_CTX vec3 operator*(float s) const { return vec3(x*s, y*s, z*s); }
@@ -78,6 +85,10 @@ namespace glsl {
         SHADER_CTX vec4(float _x, float _y, float _z, float _w) : x(_x), y(_y), z(_z), w(_w) {}
         SHADER_CTX vec4(const vec3& v, float _w) : x(v.x), y(v.y), z(v.z), w(_w) {}
         
+        // Array Access
+        SHADER_CTX float& operator[](int i) { return (&x)[i]; }
+        SHADER_CTX const float& operator[](int i) const { return (&x)[i]; }
+
         SHADER_CTX vec4 operator*(float s) const { return vec4(x*s, y*s, z*s, w*s); }
         SHADER_CTX vec4 operator*(const vec4& r) const { return vec4(x*r.x, y*r.y, z*r.z, w*r.w); }
         SHADER_CTX vec4 operator/(float s) const { return vec4(x/s, y/s, z/s, w/s); } 
@@ -92,19 +103,6 @@ namespace glsl {
     struct Sampler2D {
         int w, h;
         vec4* data;
-    };
-
-    struct InputState {
-        bool up, down, w, s, space;
-        float dt, time;
-    };
-
-    struct GameData {
-        vec2 paddleL;
-        vec2 paddleR;
-        vec2 ballPos;
-        vec2 ballVel;
-        float hitTimer;
     };
 
     // --- Global Operators ---
@@ -151,20 +149,22 @@ namespace glsl {
     SHADER_CTX inline vec2 min(const vec2 &a, float b) { return vec2(::fminf(a.x,b), ::fminf(a.y,b)); }
     SHADER_CTX inline vec2 floor(const vec2 &a) { return vec2(::floorf(a.x), ::floorf(a.y)); }
     
-    // --- FRACT (The missing piece for Warp!) ---
     SHADER_CTX inline vec2 fract(const vec2 &a) { return vec2(fract(a.x), fract(a.y)); }
     SHADER_CTX inline vec3 fract(const vec3 &a) { return vec3(fract(a.x), fract(a.y), fract(a.z)); }
     SHADER_CTX inline vec4 fract(const vec4 &a) { return vec4(fract(a.x), fract(a.y), fract(a.z), fract(a.w)); }
     
-    // Mix
     SHADER_CTX inline vec3 mix(const vec3 &x, const vec3 &y, float a) { return vec3(mix(x.x, y.x, a), mix(x.y, y.y, a), mix(x.z, y.z, a)); }
     SHADER_CTX inline vec4 mix(const vec4 &x, const vec4 &y, float a) { return vec4(mix(x.x, y.x, a), mix(x.y, y.y, a), mix(x.z, y.z, a), mix(x.w, y.w, a)); }
 
-    // Trig & Exp
+    // --- Trigonometry (FIXED: Added vec3 support) ---
     SHADER_CTX inline vec2 sin(const vec2 &a) { return vec2(::sinf(a.x), ::sinf(a.y)); }
+    SHADER_CTX inline vec3 sin(const vec3 &a) { return vec3(::sinf(a.x), ::sinf(a.y), ::sinf(a.z)); }
     SHADER_CTX inline vec4 sin(const vec4 &a) { return vec4(::sinf(a.x), ::sinf(a.y), ::sinf(a.z), ::sinf(a.w)); }
+    
     SHADER_CTX inline vec2 cos(const vec2 &a) { return vec2(::cosf(a.x), ::cosf(a.y)); }
+    SHADER_CTX inline vec3 cos(const vec3 &a) { return vec3(::cosf(a.x), ::cosf(a.y), ::cosf(a.z)); }
     SHADER_CTX inline vec4 cos(const vec4 &a) { return vec4(::cosf(a.x), ::cosf(a.y), ::cosf(a.z), ::cosf(a.w)); }
+    
     SHADER_CTX inline vec3 sqrt(const vec3 &a) { return vec3(::sqrtf(a.x), ::sqrtf(a.y), ::sqrtf(a.z)); }
     SHADER_CTX inline vec4 exp(const vec4 &a) { return vec4(::expf(a.x), ::expf(a.y), ::expf(a.z), ::expf(a.w)); }
     SHADER_CTX inline vec4 tanh(const vec4 &a) { return vec4(::tanhf(a.x), ::tanhf(a.y), ::tanhf(a.z), ::tanhf(a.w)); }

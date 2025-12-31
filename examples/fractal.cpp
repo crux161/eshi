@@ -1,46 +1,28 @@
 #include "../glsl_core.h"
-#include <math.h>
-
 using namespace glsl;
 
-SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime, GameData /*game*/) {
-    
-    
-    float zoom = 1.5f + sinf(iTime * 0.5f) * 0.5f;
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     vec2 uv = (fragCoord - iResolution * 0.5f) / iResolution.y;
     
+    vec3 col = vec3(0.0f);
+    vec2 z = uv;
+    float t = iTime * 0.2f;
     
-    vec2 c = uv * zoom;
-    c.x -= 0.5f; 
-
+    vec2 c = vec2(sin(t), cos(t)) * 0.7f;
     
-    vec2 z = c;
     float iter = 0.0f;
-    const float max_iter = 32.0f;
-
-    
-    vec2 seed = vec2(sinf(iTime * 0.5f) * 0.7f, cosf(iTime * 0.3f) * 0.7f);
-
-    for (float i = 0.0f; i < max_iter; i++) {
-        
-        
-        float x = (z.x * z.x - z.y * z.y) + seed.x;
-        float y = (2.0f * z.x * z.y) + seed.y;
-        
+    for(float i=0.0f; i<32.0f; i+=1.0f) {
+        // Complex square: z = z*z + c
+        float x = (z.x * z.x - z.y * z.y) + c.x;
+        float y = (2.0f * z.x * z.y) + c.y;
         z = vec2(x, y);
-
         
-        if (dot(z, z) > 4.0f) break;
-        iter++;
+        if(length(z) > 4.0f) break;
+        iter += 1.0f;
     }
-
     
-    float t = iter / max_iter;
+    float val = iter / 32.0f;
+    col = vec3(val, val * 0.5f, sin(val * 6.0f));
     
-    
-    float r = t * 2.0f; 
-    float g = t * 1.0f;
-    float b = t * 0.2f;
-
-    fragColor = vec4(r, g, b, 1.0f);
+    fragColor = vec4(col.x, col.y, col.z, 1.0f);
 }

@@ -4,15 +4,14 @@ using namespace glsl;
 SHADER_CTX inline vec2 hash2(vec2 p) {  
     p = vec2(dot(p, vec2(127.1f, 311.7f)),
              dot(p, vec2(269.5f, 183.3f)));
-    
-    // p.xyyx() -> vec4(p.x, p.y, p.y, p.x)
+    // p.xyyx
     vec4 s = sin(vec4(p.x, p.y, p.y, p.x)); 
     
     return vec2(s.x * 43758.5453f - floor(s.x * 43758.5453f), 
                 s.y * 43758.5453f - floor(s.y * 43758.5453f));
 }
 
-SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime, GameData /*game*/) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     vec2 uv = fragCoord / iResolution.y;
     uv = uv * 5.0f;
     
@@ -27,7 +26,7 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
             vec2 point = hash2(i_st + neighbor);
             
             vec4 trig = sin(vec4(iTime + 6.2831f * point.x, iTime + 6.2831f * point.y, 0, 0));
-            // .xy() -> vec2(x, y)
+            // .xy()
             point = vec2(0.5f, 0.5f) + 0.5f * vec2(trig.x, trig.y);
             
             vec2 diff = neighbor + point - f_st;

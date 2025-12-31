@@ -1,42 +1,20 @@
 #include "../glsl_core.h"
-#include <math.h> 
-
 using namespace glsl;
 
-SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime, GameData /*game*/) {
-    
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     vec2 uv = (fragCoord - iResolution * 0.5f) / iResolution.y;
-
     
+    float t = iTime * 0.5f;
+    vec3 col = vec3(0.0f);
     
-    vec2 b1 = vec2(cosf(iTime * 1.5f), sinf(iTime)) * 0.4f;
-    
-    vec2 b2 = vec2(sinf(iTime * 2.0f), cosf(iTime * 1.8f)) * 0.5f;
-    
-    vec2 b3 = vec2(cosf(iTime * 3.1f), sinf(iTime * 2.7f)) * 0.6f;
-
-    
-    float d1 = length(uv - b1);
-    float d2 = length(uv - b2);
-    float d3 = length(uv - b3);
-
-    
-    float field = (0.1f / d1) + (0.1f / d2) + (0.1f / d3);
-
-    
-    
-    
-    
-    vec4 col = vec4(0.0f, 0.05f, 0.2f, 1.0f);
-
-    if (field > 1.0f) {
+    for(float i=0.0f; i<3.0f; i+=1.0f) {
+        vec2 p = uv;
+        p.x += sin(t + p.y * (2.0f + i)) * 0.2f;
+        p.y += cos(t + p.x * (1.5f + i)) * 0.2f;
         
-        float rim = 0.0f; 
-        if(field < 1.2f) rim = 1.0f; 
-        
-        vec4 coreColor = vec4(0.2f, 0.8f, 1.0f, 1.0f); 
-        col = mix(col, coreColor + rim, 0.8f);
+        float d = length(p);
+        col[int(i)] = 0.05f / abs(d - 0.5f);
     }
-
-    fragColor = col;
+    
+    fragColor = vec4(col.x, col.y, col.z, 1.0f);
 }

@@ -1,18 +1,12 @@
 #pragma once
-#include <cstdint>
+#include <stdint.h>
 #include "glsl_core.h"
+
+void uploadTextureToGPU(int w, int h, glsl::vec4* host_data);
 
 class GpuRenderer {
 public:
     GpuRenderer(int w, int h);
     ~GpuRenderer();
-    void renderFrame(uint8_t* pixelBuffer, int stride, float time, glsl::GameData* gameData);
-
-private:
-    // These were missing!
-    int width;
-    int height;
+    void renderFrame(uint8_t* pixelBuffer, int stride, float time);
 };
-
-// Global helper
-void uploadTextureToGPU(int w, int h, void* data);

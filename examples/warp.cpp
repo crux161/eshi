@@ -7,7 +7,7 @@ using namespace glsl;
     extern Sampler2D iChannel0;
 #endif
 
-// Keep your original helper functions
+// Helpers
 SHADER_CTX inline float dot3(vec4 a, vec4 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
 SHADER_CTX inline float length3(vec4 v) { return sqrt(dot3(v, v)); }
 SHADER_CTX inline vec4 normalize3(vec4 v) { float l = length3(v); return (l==0.0f) ? vec4(0.0f) : v / l; }
@@ -19,7 +19,7 @@ SHADER_CTX vec2 W(vec2 p, float iTime) {
     float t = iTime / 2.0f;
 
     for (int i=0; i<3; i++) {
-        // FIXED: p.yx() -> vec2(p.y, p.x)
+        // p.yx
         p += cos(vec2(p.y, p.x) * 3.0f + vec2(t, 1.57f)) / 3.0f;
         p += sin(vec2(p.y, p.x) + t + vec2(1.57f, 0.0f)) / 2.0f;
         p *= 1.3f; 
@@ -38,7 +38,7 @@ SHADER_CTX float bumpFunc(vec2 p, float iTime) {
 }
 
 SHADER_CTX vec4 smoothFract(vec4 x) { 
-    x = fract(x); // Using glsl_core fract
+    x = fract(x); 
     return vec4(
         min(x.x, x.x*(1.0f-x.x)*12.0f),
         min(x.y, x.y*(1.0f-x.y)*12.0f),
@@ -47,7 +47,7 @@ SHADER_CTX vec4 smoothFract(vec4 x) {
     ); 
 }
 
-SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime, GameData /*game*/) {
+SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     vec2 uv = (fragCoord - iResolution * 0.5f) / iResolution.y;
 
     vec4 sp = vec4(uv.x, uv.y, 0.0f, 0.0f);
@@ -57,10 +57,10 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
 
     vec2 eps = vec2(4.0f / iResolution.y, 0.0f);
     
-    // FIXED: Swizzles
     vec2 sp_xy = vec2(sp.x, sp.y);
     float f = bumpFunc(sp_xy, iTime);
     float fx = bumpFunc(sp_xy - eps, iTime); 
+    // sp.xy, eps.yx
     float fy = bumpFunc(sp_xy - vec2(eps.y, eps.x), iTime);
 
     const float bumpFactor = 0.05f;
@@ -84,10 +84,8 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
     float spec = pow(max(dot3(refl, rd * -1.0f), 0.0f), 12.0f);
 
     vec2 wVal = W(sp_xy, iTime);
-    
     vec2 texUV = sp_xy + wVal * 0.125f; 
     vec4 texColRaw = texture(iChannel0, texUV); 
-    
     vec4 texCol = texColRaw;
     texCol = texCol * texCol; 
     
