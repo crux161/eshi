@@ -66,7 +66,7 @@ ifeq ($(detected_OS),Darwin)
 endif
 
 
-PKGS     = sdl2 libavcodec libavformat libavutil libswscale
+PKGS     = sdl2 SDL2_ttf libavcodec libavformat libavutil libswscale
 CXXFLAGS += $(shell pkg-config --cflags $(PKGS))
 LDFLAGS  = $(shell pkg-config --libs $(PKGS)) $(LDFLAGS_EXTRA) $(LDFLAGS_CUDA)
 

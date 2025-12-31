@@ -1,52 +1,63 @@
 #pragma once
-#include "glsl_core.h"
+#include <vector>
+#include <cstdint>
+#include <cmath>
+#include <algorithm>
 #include <omp.h>
-#include <algorithm> 
+#include "glsl_core.h"
 
-using namespace glsl;
-
-#ifndef LINK_SHADER
-    #include "shader.cpp"
-#else
-    void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime);
-#endif
-
+// Forward declaration
+void mainImage(glsl::vec4& fragColor, glsl::vec2 fragCoord, glsl::vec2 iResolution, float iTime, glsl::GameData game);
 
 class CpuRenderer {
-    int width, height;
+    int width;
+    int height;
 
 public:
-    CpuRenderer(int w, int h) : width(w), height(h) {
-        #ifdef _OPENMP
-            printf("CPU Renderer: OpenMP Active (%d threads)\n", omp_get_max_threads());
-        #else
-            printf("CPU Renderer: Single Threaded\n");
-        #endif
-    }
+    CpuRenderer(int w, int h) : width(w), height(h) {}
 
-    
-    void renderFrame(uint8_t* pixelBuffer, int stride, float time) {
-        vec2 iResolution((float)width, (float)height);
+    void renderFrame(uint8_t* pixelBuffer, int stride, float time, glsl::GameData* gameData) {
+        glsl::vec2 iResolution((float)width, (float)height);
+        glsl::GameData currentGame = *gameData;
 
-        #pragma omp parallel for
+        // Auto-detect Bytes Per Pixel (BPP)
+        // If stride is ~width*4, use 4 bytes. If ~width*3, use 3 bytes.
+        int bpp = stride / width; 
+        
+        // Safety check: Default to 4 if calculation fails or padding throws it off significantly
+        if (bpp != 3 && bpp != 4) bpp = 4;
+
+        #pragma omp parallel for collapse(2)
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
+                // GLSL coordinates (Y is up)
+                glsl::vec2 fragCoord((float)x, (float)(height - 1 - y));
                 
-                vec4 color;
-                vec2 fragCoord((float)x, (float)y);
-                mainImage(color, fragCoord, iResolution, time);
+                glsl::vec4 color(0.0f, 0.0f, 0.0f, 1.0f);
 
-                
-                
-                float r = fmaxf(0.0f, fminf(color.x, 1.0f));
-                float g = fmaxf(0.0f, fminf(color.y, 1.0f));
-                float b = fmaxf(0.0f, fminf(color.z, 1.0f));
+                // Run Shader
+                mainImage(color, fragCoord, iResolution, time, currentGame);
 
-                
-                int idx = y * stride + x * 3;
-                pixelBuffer[idx + 0] = (uint8_t)(r * 255.0f);
-                pixelBuffer[idx + 1] = (uint8_t)(g * 255.0f);
-                pixelBuffer[idx + 2] = (uint8_t)(b * 255.0f);
+                // Convert to 0-255
+                int r = (int)(glsl::clamp(color.x, 0.0f, 1.0f) * 255.0f);
+                int g = (int)(glsl::clamp(color.y, 0.0f, 1.0f) * 255.0f);
+                int b = (int)(glsl::clamp(color.z, 0.0f, 1.0f) * 255.0f);
+
+                // Calculate offset based on detected BPP
+                int offset = y * stride + x * bpp;
+
+                if (bpp == 4) {
+                    // Standard RGBA (32-bit)
+                    pixelBuffer[offset + 0] = (uint8_t)r;
+                    pixelBuffer[offset + 1] = (uint8_t)g;
+                    pixelBuffer[offset + 2] = (uint8_t)b;
+                    pixelBuffer[offset + 3] = 255;
+                } else {
+                    // RGB (24-bit) - Fixes the glitch if Display uses this format
+                    pixelBuffer[offset + 0] = (uint8_t)r;
+                    pixelBuffer[offset + 1] = (uint8_t)g;
+                    pixelBuffer[offset + 2] = (uint8_t)b;
+                }
             }
         }
     }
