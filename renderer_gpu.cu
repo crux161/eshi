@@ -1,91 +1,85 @@
+#include "renderer_gpu.h"
+#include <iostream>
 #include <cuda_runtime.h>
-#include <stdio.h>
-
 #include "glsl_core.h"
-#include "renderer_gpu.h" 
 
-using namespace glsl;
-
-__device__ Sampler2D iChannel0;
+// Define block sizes
+#define BLOCK_W 16
+#define BLOCK_H 16
 
 namespace gpu {
-	#ifndef SHADER_PATH
-	    #include "shader.cpp"
-	#else
-	    #include SHADER_PATH
-	#endif
+    using namespace glsl; 
+    #include SHADER_PATH
 }
 
-void uploadTextureToGPU(int w, int h, vec4* host_data) {
-    vec4* d_data;
-    size_t size = w * h * sizeof(vec4);
-    
-    
-    cudaMalloc(&d_data, size);
-    cudaMemcpy(d_data, host_data, size, cudaMemcpyHostToDevice);
-    
-    
-    Sampler2D temp;
-    temp.w = w;
-    temp.h = h;
-    temp.data = d_data;
-    
-    
-    cudaMemcpyToSymbol(iChannel0, &temp, sizeof(Sampler2D));
-    
-    printf("GPU: Texture uploaded (%dx%d)\n", w, h);
-}
-
-__global__ void renderKernel(uchar3* output, int width, int height, float time) {
+// --- UPDATED KERNEL: Handles Variable Bytes-Per-Pixel (BPP) ---
+__global__ void renderKernel(uint8_t* pixelBuffer, int width, int height, int stride, int bpp, float time, glsl::GameData gameData) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= width || y >= height) return;
 
-    vec2 iResolution((float)width, (float)height);
-    vec2 fragCoord((float)x, (float)y);
-    vec4 color;
+    // Normalize coordinates
+    glsl::vec2 iResolution((float)width, (float)height);
+    glsl::vec2 fragCoord((float)x, (float)(height - 1 - y));
 
-    gpu::mainImage(color, fragCoord, iResolution, time);
+    glsl::vec4 color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    float r = fmaxf(0.0f, fminf(color.x, 1.0f));
-    float g = fmaxf(0.0f, fminf(color.y, 1.0f));
-    float b = fmaxf(0.0f, fminf(color.z, 1.0f));
+    // Call Shader
+    gpu::mainImage(color, fragCoord, iResolution, time, gameData);
 
-    int idx = y * width + x;
-    output[idx] = make_uchar3((unsigned char)(r * 255.0f), (unsigned char)(g * 255.0f), (unsigned char)(b * 255.0f));
-}
+    // Color conversion
+    int r = (int)(glsl::clamp(color.x, 0.0f, 1.0f) * 255.0f);
+    int g = (int)(glsl::clamp(color.y, 0.0f, 1.0f) * 255.0f);
+    int b = (int)(glsl::clamp(color.z, 0.0f, 1.0f) * 255.0f);
 
+    // --- FIXED: Calculate offset using detected BPP ---
+    int offset = y * stride + x * bpp;
 
-uchar3* d_buffer = NULL; 
-int g_width, g_height;
-
-GpuRenderer::GpuRenderer(int w, int h) {
-    g_width = w; g_height = h;
-    printf("GPU Renderer: Initializing CUDA... ");
-    cudaMalloc(&d_buffer, w * h * sizeof(uchar3));
-    printf("Ready.\n");
-}
-
-GpuRenderer::~GpuRenderer() {
-    if (d_buffer) cudaFree(d_buffer);
-}
-
-void GpuRenderer::renderFrame(uint8_t* pixelBuffer, int stride, float time) {
-    dim3 blockSize(16, 16);
-    dim3 gridSize((g_width + blockSize.x - 1) / blockSize.x, (g_height + blockSize.y - 1) / blockSize.y);
-
-    renderKernel<<<gridSize, blockSize>>>(d_buffer, g_width, g_height, time);
-    cudaDeviceSynchronize();
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-	fprintf(stderr, "GPU Kernel Error: %s\n", cudaGetErrorString(err));
+    if (bpp == 4) {
+        // 32-bit Mode (RGBA)
+        pixelBuffer[offset + 0] = r;
+        pixelBuffer[offset + 1] = g;
+        pixelBuffer[offset + 2] = b;
+        pixelBuffer[offset + 3] = 255; 
+    } else {
+        // 24-bit Mode (RGB)
+        pixelBuffer[offset + 0] = r;
+        pixelBuffer[offset + 1] = g;
+        pixelBuffer[offset + 2] = b;
     }
+}
 
+GpuRenderer::GpuRenderer(int w, int h) : width(w), height(h) {}
+GpuRenderer::~GpuRenderer() {}
+
+void GpuRenderer::renderFrame(uint8_t* pixelBuffer, int stride, float time, glsl::GameData* gameData) {
+    uint8_t* d_pixels;
+    
+    // Auto-detect BPP (Bytes Per Pixel)
+    // If stride is 4x width, it's RGBA. If 3x, it's RGB.
+    int bpp = stride / width;
+    if (bpp != 3 && bpp != 4) bpp = 4; // Safety fallback
+
+    size_t size = stride * height; 
+    
+    cudaMalloc(&d_pixels, size);
+
+    dim3 block(BLOCK_W, BLOCK_H);
+    dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+
+    glsl::GameData data = *gameData;
+
+    // Pass BPP to Kernel
+    renderKernel<<<grid, block>>>(d_pixels, width, height, stride, bpp, time, data);
+    
     cudaDeviceSynchronize();
+    cudaMemcpy(pixelBuffer, d_pixels, size, cudaMemcpyDeviceToHost);
     
-    
-    
-    cudaMemcpy(pixelBuffer, d_buffer, g_width * g_height * sizeof(uchar3), cudaMemcpyDeviceToHost);
+    cudaFree(d_pixels);
+}
+
+void uploadTextureToGPU(int w, int h, void* data) {
+    // Placeholder
+    (void)w; (void)h; (void)data;
 }

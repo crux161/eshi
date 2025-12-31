@@ -36,6 +36,7 @@ bin/
 x64/
 Debug/
 Release/
+x/
 
 # --- IDE / Editor Settings ---
 .vs/
