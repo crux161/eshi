@@ -1,7 +1,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-#include "glsl_core.h"
+#include <sumi/sumi.h>
 #include "encoder.h"
 #include "renderer_cpu.h" 
 #include "display.h" 
@@ -17,11 +17,11 @@
 #include <string>
 #include <iostream>
 #include <vector>
-#include <chrono> // Added for accurate timekeeping
+#include <chrono>
 
-using namespace glsl;
+using namespace sumi;
 
-// GLOBAL TEXTURE
+
 Sampler2D iChannel0 = {0, 0, nullptr};
 
 #define STRINGIFY(x) #x
@@ -36,6 +36,9 @@ std::string get_filename(std::string path) {
 }
 
 int main(int argc, char** argv) {
+    
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     int W = 960; 
     int H = 540;
     const int FPS = 60;
@@ -129,15 +132,12 @@ int main(int argc, char** argv) {
 
     if (live_mode) {
         Display window(W, H, "Eshi Live Preview");
-        
-        // FIXED: Use wall-clock time
         auto start_time = std::chrono::high_resolution_clock::now();
         
         while (window.isOpen()) {
             int stride;
             uint8_t* pixels = window.get_pixel_buffer(stride);
             
-            // Calculate elapsed time in seconds
             auto now = std::chrono::high_resolution_clock::now();
             std::chrono::duration<float> elapsed = now - start_time;
             float time = elapsed.count();
@@ -174,7 +174,6 @@ int main(int argc, char** argv) {
             if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
 
             video.submit_frame();
-            if(i%30==0) printf(".");
         }
         printf("\nDone.\n");
     }

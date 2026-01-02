@@ -17,7 +17,7 @@ public:
         window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
                                   width, height, SDL_WINDOW_SHOWN);
         
-        // FIXED: Added SDL_RENDERER_PRESENTVSYNC to lock FPS to monitor refresh rate
+        
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         
         texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, 

@@ -1,9 +1,19 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
-#include "glsl_core.h"
+#include <stdlib.h>
+#include <sumi/sumi.h>
 #include "renderer_gpu.h" 
 
-using namespace glsl;
+using namespace sumi;
+
+
+#define cudaCheck(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true) {
+   if (code != cudaSuccess) {
+      fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(code), file, line);
+      if (abort) exit(code);
+   }
+}
 
 __device__ Sampler2D iChannel0;
 
@@ -18,15 +28,15 @@ namespace gpu {
 void uploadTextureToGPU(int w, int h, vec4* host_data) {
     vec4* d_data;
     size_t size = w * h * sizeof(vec4);
-    cudaMalloc(&d_data, size);
-    cudaMemcpy(d_data, host_data, size, cudaMemcpyHostToDevice);
+    cudaCheck(cudaMalloc(&d_data, size));
+    cudaCheck(cudaMemcpy(d_data, host_data, size, cudaMemcpyHostToDevice));
     
     Sampler2D temp;
     temp.w = w;
     temp.h = h;
     temp.data = d_data;
     
-    cudaMemcpyToSymbol(iChannel0, &temp, sizeof(Sampler2D));
+    cudaCheck(cudaMemcpyToSymbol(iChannel0, &temp, sizeof(Sampler2D)));
     printf("GPU: Texture uploaded (%dx%d)\n", w, h);
 }
 
@@ -40,7 +50,7 @@ __global__ void renderKernel(uchar4* output, int width, int height, float time) 
     vec2 fragCoord((float)x, (float)(height - 1 - y));
     vec4 color;
 
-    // Call with 4 arguments
+    
     gpu::mainImage(color, fragCoord, iResolution, time);
 
     float r = ::fmaxf(0.0f, ::fminf(color.x, 1.0f));
@@ -57,7 +67,7 @@ int g_width, g_height;
 GpuRenderer::GpuRenderer(int w, int h) {
     g_width = w; g_height = h;
     printf("GPU Renderer: Initializing CUDA... ");
-    cudaMalloc(&d_buffer, w * h * sizeof(uchar4));
+    cudaCheck(cudaMalloc(&d_buffer, w * h * sizeof(uchar4)));
     printf("Ready.\n");
 }
 
@@ -70,7 +80,16 @@ void GpuRenderer::renderFrame(uint8_t* pixelBuffer, int stride, float time) {
     dim3 gridSize((g_width + blockSize.x - 1) / blockSize.x, (g_height + blockSize.y - 1) / blockSize.y);
 
     renderKernel<<<gridSize, blockSize>>>(d_buffer, g_width, g_height, time);
-    cudaDeviceSynchronize();
+    cudaCheck(cudaPeekAtLastError());
+    cudaCheck(cudaDeviceSynchronize());
     
-    cudaMemcpy(pixelBuffer, d_buffer, g_width * g_height * sizeof(uchar4), cudaMemcpyDeviceToHost);
+    
+    
+    
+    
+    if (stride == g_width * 4) {
+        cudaCheck(cudaMemcpy(pixelBuffer, d_buffer, g_width * g_height * sizeof(uchar4), cudaMemcpyDeviceToHost));
+    } else {
+        cudaCheck(cudaMemcpy2D(pixelBuffer, stride, d_buffer, g_width * sizeof(uchar4), g_width * sizeof(uchar4), g_height, cudaMemcpyDeviceToHost));
+    }
 }

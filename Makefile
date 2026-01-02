@@ -1,11 +1,8 @@
 
 
 
-
-
-
 CUDA_PATH_LINUX ?= /usr/local/cuda
-
+SUMI_PATH ?= ../libsumi
 
 ifeq ($(OS),Windows_NT)
     detected_OS := Windows
@@ -16,12 +13,13 @@ endif
 CXX       = g++
 BUILD_DIR = build
 LOG_DIR	  = logs
-CXXFLAGS  = -fPIE -pie -std=c++11 -I. -fopenmp -O3 -Wall -Wextra -flto -DLINK_SHADER
+
+CXXFLAGS  = -fPIE -pie -std=c++11 -I. -I$(SUMI_PATH)/include -fopenmp -O3 -Wall -Wextra -flto -DLINK_SHADER
 OMP_LIB   = -lgomp
 EXE_EXT   =
 RM_CMD    = rm -rf
-NVCC_FLAGS = -O3 -I.
 
+NVCC_FLAGS = -O3 -I. -I$(SUMI_PATH)/include
 
 NVCC_PATH := $(shell which nvcc 2>/dev/null)
 ifeq ($(NVCC_PATH),)
@@ -31,13 +29,11 @@ ifeq ($(NVCC_PATH),)
 endif
 
 ifneq ($(NVCC_PATH),)
-
     USE_GPU  = 1
     CXXFLAGS += -DUSE_CUDA
     LDFLAGS_CUDA = -lcudart
 
     ifeq ($(detected_OS),Linux)
-
         LDFLAGS_CUDA += -L$(CUDA_PATH_LINUX)/lib64 -L/opt/cuda/lib
         CXXFLAGS += -I$(CUDA_PATH_LINUX)/include
     endif
@@ -61,7 +57,7 @@ endif
 ifeq ($(detected_OS),Darwin)
     CXX         = clang++
     BREW_PREFIX := $(shell brew --prefix libomp)
-    CXXFLAGS    = -std=c++11 -I. -Xpreprocessor -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
+    CXXFLAGS    = -std=c++11 -I. -I$(SUMI_PATH)/include -Xpreprocessor -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
     OMP_LIB     = -L$(BREW_PREFIX)/lib -lomp
 endif
 
@@ -97,32 +93,26 @@ $(BUILD_DIR)/eshi$(EXE_EXT): $(ESHI_DEPS) | $(BUILD_DIR)
 examples: $(EXAMPLE_BINS)
 
 
-main.o: main.cpp glsl_core.h encoder.h renderer_cpu.h
+main.o: main.cpp encoder.h renderer_cpu.h
 	$(CXX) $(CXXFLAGS) -c main.cpp -o main.o
 
-shader.o: shader.cpp glsl_core.h
+shader.o: shader.cpp
 	$(CXX) $(CXXFLAGS) -c shader.cpp -o shader.o
 
-
-renderer_gpu.o: renderer_gpu.cu glsl_core.h renderer_gpu.h
+renderer_gpu.o: renderer_gpu.cu renderer_gpu.h
 	nvcc $(NVCC_FLAGS) -DSHADER_PATH='"shader.cpp"' -c renderer_gpu.cu -o renderer_gpu.o
 
-
-$(BUILD_DIR)/%.o: examples/%.cpp glsl_core.h | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: examples/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-
-$(BUILD_DIR)/%_gpu.o: renderer_gpu.cu examples/%.cpp glsl_core.h | $(BUILD_DIR)
+$(BUILD_DIR)/%_gpu.o: renderer_gpu.cu examples/%.cpp | $(BUILD_DIR)
 	nvcc $(NVCC_FLAGS) -DSHADER_PATH='"examples/$*.cpp"' -c renderer_gpu.cu -o $@
 
-
 ifeq ($(USE_GPU),1)
-
 $(BUILD_DIR)/%$(EXE_EXT): $(BUILD_DIR)/%.o $(MAIN_OBJ) $(BUILD_DIR)/%_gpu.o
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(OMP_LIB)
 	@$(RM_CMD) $<
 else
-
 $(BUILD_DIR)/%$(EXE_EXT): $(BUILD_DIR)/%.o $(MAIN_OBJ)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(OMP_LIB)
 	@$(RM_CMD) $<

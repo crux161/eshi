@@ -10,7 +10,6 @@
 
 typedef char GLchar;
 typedef ptrdiff_t GLsizeiptr;
-
 #define GL_COMPILE_STATUS 0x8B81
 #define GL_LINK_STATUS 0x8B82
 #define GL_FRAGMENT_SHADER 0x8B30
@@ -32,6 +31,8 @@ typedef ptrdiff_t GLsizeiptr;
 #define GL_TEXTURE_MIN_FILTER 0x2801
 #define GL_TEXTURE_MAG_FILTER 0x2800
 #define GL_LINEAR 0x2601
+
+
 
 typedef void (APIENTRY *PFNGLGENBUFFERS)(GLsizei, GLuint*);
 typedef void (APIENTRY *PFNGLBINDBUFFER)(GLenum, GLuint);
@@ -69,7 +70,7 @@ class GlRenderer {
     GLuint fbo, fbo_texture;
     GLuint vbo, vao;
     GLuint user_texture = 0;
-    
+
     
     PFNGLGENBUFFERS glGenBuffers = nullptr;
     PFNGLBINDBUFFER glBindBuffer = nullptr;
@@ -141,16 +142,12 @@ class GlRenderer {
     std::string resolvePath(std::string path) {
         struct stat buffer;
         if (stat(path.c_str(), &buffer) == 0) return path;
-        
         std::string up = "../" + path;
         if (stat(up.c_str(), &buffer) == 0) return up;
-        
-        
         if (path.substr(0, 3) == "../") {
             std::string stripped = path.substr(3);
             if (stat(stripped.c_str(), &buffer) == 0) return stripped;
         }
-
         return "";
     }
 
@@ -173,21 +170,16 @@ class GlRenderer {
         std::ifstream f(cleanPath);
         std::string content, line;
         while(std::getline(f, line)) {
-            
             if(line.find("#include") != std::string::npos) continue;
             if(line.find("#pragma") != std::string::npos) continue;
             if(line.find("using namespace") != std::string::npos) continue;
             if(line.find("extern") != std::string::npos) continue; 
             
-            
             line = replaceAll(line, "inline ", "");
             line = replaceAll(line, "vec4 &fragColor", "out vec4 fragColor");
             line = replaceAll(line, "vec4 &", "out vec4 ");
-            
-            
             line = replaceAll(line, "if (iChannel0.data == nullptr)", "if (false)");
 
-            
             line = replaceAll(line, ".xyyx()", ".xyyx");
             line = replaceAll(line, ".xyz()", ".xyz");
             line = replaceAll(line, ".xy()", ".xy");
@@ -247,6 +239,8 @@ public:
         glCompileShader(vs);
 
         std::string userCode = readFile(shaderPath);
+        
+        
         std::string fsSrc = "#version 330 core\n"
                             "out vec4 FragColor;\n"
                             "uniform vec2 iResolution;\n"
@@ -254,6 +248,7 @@ public:
                             "uniform sampler2D iChannel0;\n"
                             "\n"
                             "// --- Compatibility Wrapper ---\n"
+                            "#define SUMI_CTX \n" 
                             "#define SHADER_CTX \n"
                             "#define M_PI 3.14159265359\n"
                             "#define sinf sin\n"

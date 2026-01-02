@@ -1,5 +1,5 @@
 #pragma once
-#include "glsl_core.h" // For types like vec2, GameData
+#include "glsl_core.h" 
 
 class IGame {
 public:
@@ -7,6 +7,6 @@ public:
     virtual void Init() = 0;
     virtual void Update(float dt) = 0;
     
-    // Returns the data needed by the GPU/CPU renderer
+    
     virtual glsl::GameData* GetGameData() = 0; 
 };

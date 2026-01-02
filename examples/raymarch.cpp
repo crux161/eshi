@@ -1,11 +1,13 @@
 #include "../glsl_core.h"
-#include <math.h>
 
 using namespace glsl;
 
-// Helper functions defined using glsl types
+
 SHADER_CTX inline float dot3(vec4 a, vec4 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
-SHADER_CTX inline float length3(vec4 v) { return sqrt(dot3(v, v)); }
+
+
+SHADER_CTX inline float length3(vec4 v) { return glsl::sqrt(dot3(v, v)); }
+
 SHADER_CTX inline vec4 normalize3(vec4 v) { float l = length3(v); return (l==0.0f) ? vec4(0,0,0,0) : v / l; }
 
 SHADER_CTX float map(vec4 p) {  
@@ -26,13 +28,15 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
     for(int i=0; i<64; i++) {
         vec4 p = ro + rd * t; 
         
-        p.x += sin(iTime) * 0.5f;
+        
+        p.x += glsl::sin(iTime) * 0.5f;
         
         d = map(p); 
         
         if(d < 0.01f) {
             vec4 normal = normalize3(p); 
-            vec4 lightDir = normalize3(vec4(sin(iTime), 1.0f, -1.0f, 0.0f));
+            
+            vec4 lightDir = normalize3(vec4(glsl::sin(iTime), 1.0f, -1.0f, 0.0f));
             
             float diff = dot3(normal, lightDir);
             if(diff < 0.0f) diff = 0.0f; 

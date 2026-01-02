@@ -1,8 +1,8 @@
 #pragma once
 #include <stdint.h>
-#include "glsl_core.h"
+#include <sumi/sumi.h>
 
-void uploadTextureToGPU(int w, int h, glsl::vec4* host_data);
+void uploadTextureToGPU(int w, int h, sumi::vec4* host_data);
 
 class GpuRenderer {
 public:

@@ -1,13 +1,14 @@
 #pragma once
-#include "glsl_core.h"
+#include <sumi/sumi.h>
 #include <omp.h>
 #include <algorithm> 
 
-using namespace glsl;
+using namespace sumi;
 
 #ifndef LINK_SHADER
     #include "shader.cpp"
 #else
+    
     void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime);
 #endif
 
@@ -33,9 +34,9 @@ public:
                 vec2 fragCoord((float)x, (float)(height - 1 - y));
                 mainImage(color, fragCoord, iResolution, time);
 
-                float r = glsl::max(0.0f, glsl::min(color.x, 1.0f));
-                float g = glsl::max(0.0f, glsl::min(color.y, 1.0f));
-                float b = glsl::max(0.0f, glsl::min(color.z, 1.0f));
+                float r = sumi::max(0.0f, sumi::min(color.x, 1.0f));
+                float g = sumi::max(0.0f, sumi::min(color.y, 1.0f));
+                float b = sumi::max(0.0f, sumi::min(color.z, 1.0f));
 
                 int idx = y * stride + x * 4;
                 pixelBuffer[idx + 0] = (uint8_t)(r * 255.0f);

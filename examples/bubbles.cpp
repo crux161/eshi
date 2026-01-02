@@ -2,14 +2,14 @@
 using namespace glsl;
 
 SHADER_CTX inline float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898f, 78.233f))) * 43758.5453f);
+    return glsl::fract(glsl::sin(glsl::dot(p, vec2(12.9898f, 78.233f))) * 43758.5453f);
 }
 
 SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, float iTime) {
     vec2 uv = fragCoord / iResolution.y;
     vec2 p = uv * 8.0f;
-    vec2 i = floor(p);
-    vec2 f = fract(p);
+    vec2 i = glsl::floor(p);
+    vec2 f = glsl::fract(p);
     
     float t = iTime * 0.5f;
     float v = 0.0f;
@@ -18,10 +18,14 @@ SHADER_CTX void mainImage(vec4 &fragColor, vec2 fragCoord, vec2 iResolution, flo
         for(int x=-1; x<=1; x++) {
             vec2 g = vec2((float)x, (float)y);
             vec2 r = g - f + hash(i + g);
-            float d = length(r);
-            float s = 0.5f + 0.5f * sin(t + hash(i + g) * 6.2831f);
+            float d = glsl::length(r);
+            float s = 0.5f + 0.5f * glsl::sin(t + hash(i + g) * 6.2831f);
             float size = 0.3f * s;
-            v += smoothstep(size, size - 0.05f, d);
+            
+            
+            
+            
+            v += 1.0f - glsl::smoothstep(size - 0.05f, size, d);
         }
     }
     
