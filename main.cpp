@@ -14,15 +14,54 @@
     #include "renderer_gpu.h"
 #endif
 
+#include <SDL2/SDL.h>
 #include <string>
 #include <iostream>
 #include <vector>
 #include <chrono>
+#include <atomic>
+#include <cmath> 
 
 using namespace sumi;
 
-
+// GLOBAL TEXTURE
 Sampler2D iChannel0 = {0, 0, nullptr};
+
+// Global audio state
+std::atomic<float> g_audio_time(0.0f);
+static int g_sample_rate = 44100;
+static long long g_sample_index = 0;
+
+// Weak linkage for mainSound
+#if defined(__GNUC__) || defined(__clang__)
+    extern "C" __attribute__((weak)) vec2 mainSound(int samp, float time) {
+        return vec2(0.0f); 
+    }
+#else
+    extern "C" vec2 mainSound(int samp, float time) { return vec2(0.0f); }
+#endif
+
+void audio_callback(void* userdata, Uint8* stream, int len) {
+    float* fstream = (float*)stream;
+    int samples_to_write = len / sizeof(float) / 2; // Stereo Float32
+    
+    for (int i = 0; i < samples_to_write; i++) {
+        float t = (float)((double)g_sample_index / (double)g_sample_rate);
+        
+        vec2 s = mainSound((int)g_sample_index, t);
+        
+        // Soft Clipping
+        s.x = std::tanh(s.x * 0.5f); 
+        s.y = std::tanh(s.y * 0.5f);
+        
+        fstream[2*i]     = s.x; 
+        fstream[2*i + 1] = s.y;
+        
+        g_sample_index++;
+    }
+    
+    g_audio_time = (float)((double)g_sample_index / (double)g_sample_rate);
+}
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -36,8 +75,11 @@ std::string get_filename(std::string path) {
 }
 
 int main(int argc, char** argv) {
-    
     setvbuf(stdout, NULL, _IONBF, 0);
+
+    if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) < 0) {
+        printf("SDL Init Failed: %s\n", SDL_GetError());
+    }
 
     int W = 960; 
     int H = 540;
@@ -70,6 +112,26 @@ int main(int argc, char** argv) {
         }
     }
     
+    SDL_AudioDeviceID audio_device = 0;
+    if (live_mode) {
+        SDL_AudioSpec want, have;
+        SDL_zero(want);
+        want.freq = g_sample_rate;
+        want.format = AUDIO_F32; 
+        want.channels = 2;       
+        want.samples = 4096;     
+        want.callback = audio_callback;
+        
+        audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+        if (audio_device == 0) {
+            printf("Failed to open audio: %s\n", SDL_GetError());
+        } else {
+            printf("Audio Initialized: %d Hz, %d Channels\n", have.freq, have.channels);
+            g_sample_rate = have.freq;
+            SDL_PauseAudioDevice(audio_device, 0); 
+        }
+    }
+
     const char* texPath = "texture.jpg"; 
     int tw=0, th=0, tn=0;
     float* texData = stbi_loadf(texPath, &tw, &th, &tn, 4); 
@@ -132,15 +194,20 @@ int main(int argc, char** argv) {
 
     if (live_mode) {
         Display window(W, H, "Eshi Live Preview");
-        auto start_time = std::chrono::high_resolution_clock::now();
+        auto start_time_clock = std::chrono::high_resolution_clock::now();
         
         while (window.isOpen()) {
             int stride;
             uint8_t* pixels = window.get_pixel_buffer(stride);
             
-            auto now = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<float> elapsed = now - start_time;
-            float time = elapsed.count();
+            float time;
+            if (audio_device != 0) {
+                time = g_audio_time;
+            } else {
+                auto now = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<float> elapsed = now - start_time_clock;
+                time = elapsed.count();
+            }
             
             #ifdef USE_CUDA
             if (gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
@@ -153,7 +220,13 @@ int main(int argc, char** argv) {
             if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
             
             window.submit_frame();
+
+            // FIXED: Yield CPU time to audio thread
+            SDL_Delay(1); 
         }
+        
+        if (audio_device != 0) SDL_CloseAudioDevice(audio_device);
+
     } else {
         const int FRAMES = 240;
         SimpleEncoder video(output_name.c_str(), W, H, FPS);
@@ -186,6 +259,8 @@ int main(int argc, char** argv) {
     if (gpu_renderer) delete gpu_renderer;
     #endif
     if (vecData) delete[] vecData;
+    
+    SDL_Quit();
 
     return 0;
 }
