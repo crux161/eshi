@@ -16,6 +16,8 @@ clean.py
 *.o.tmp
 
 # --- Extras ---
+VENDORED
+sumi
 /libsumi/
 vendor.sh
 
