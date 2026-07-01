@@ -14,7 +14,7 @@ SHADER_CTX inline vec4 tanh_v(vec4 v) {
 }
 
 // Optimized exp2f
-SHADER_CTX inline float exp2(float x) { return ::exp2f(x); }
+SHADER_CTX inline float fast_exp2(float x) { return ::exp2f(x); }
 
 // Distance field for gyroid
 SHADER_CTX float g(vec4 p, float s) {
@@ -108,13 +108,13 @@ extern "C" vec2 mainSound(int s, float t) {
             }
             
             if(a < 9.0f) {
-                float mod_phase = exp2(glsl::mod(a - b, 3.0f) / 6.0f + 8.5f);
+                float mod_phase = fast_exp2(glsl::mod(a - b, 3.0f) / 6.0f + 8.5f);
                 float phase = t * j * i + i + j;
                 
                 vec2 wave = glsl::sin(m + glsl::sin(t / j / 47.0f) * 4.0f
                                       * glsl::sin(vec2(phase) * mod_phase));
                 
-                float env = exp2(-b * 12.0f - 1.0f / b + 6.0f - (i + j) / 3.0f);
+                float env = fast_exp2(-b * 12.0f - 1.0f / b + 6.0f - (i + j) / 3.0f);
                 
                 r += wave * env;
             }

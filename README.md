@@ -54,7 +54,19 @@ echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] [https://repo.charm.sh/apt/](h
 sudo apt update && sudo apt install gum
 ```
 
-**2. Compile:**
+**2. Fetch libsumi:**
+```bash
+./vendor.sh
+# or: make vendor
+```
+
+If you are actively developing libsumi in a sibling checkout, skip vendoring and pass it directly:
+```bash
+make SUMI_PATH=../libsumi -j$(nproc)
+```
+By default, the Makefile uses `./libsumi` when it exists and falls back to `../libsumi` for local libsumi development.
+
+**3. Compile:**
 ```bash
 make -j$(nproc)
 ```
@@ -68,6 +80,25 @@ You can fix this by editing the `CUDA_PATH_LINUX` variable at the top of the `Ma
 # Example for Arch Linux / CachyOS
 make CUDA_PATH_LINUX=/opt/cuda -j$(nproc)
 ```
+
+#### 🍎 macOS (Homebrew)
+
+**1. System Libraries:**
+```bash
+brew install pkg-config ffmpeg sdl2 sdl2_ttf libomp zlib bzip2 freetype
+```
+
+**2. Fetch libsumi:**
+```bash
+./vendor.sh
+# or: make vendor
+```
+
+**3. Compile:**
+```bash
+make -j$(sysctl -n hw.ncpu)
+```
+The Makefile automatically prepends Homebrew `pkg-config` paths for keg-only and macOS shim dependencies such as `zlib` and `bzip2`.
 
 #### 🪟 Windows (x64)
 

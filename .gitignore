@@ -13,6 +13,11 @@ clean.bat
 clean.py
 *.bak
 *.o
+*.o.tmp
+
+# --- Extras ---
+/libsumi/
+vendor.sh
 
 # vcpkg
 vcpkg_installed/
@@ -33,6 +38,7 @@ tmpxft_*
 # --- Directories ---
 build/
 bin/
+logs/
 x64/
 Debug/
 Release/

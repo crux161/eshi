@@ -1,8 +1,34 @@
 
-
-
 CUDA_PATH_LINUX ?= /usr/local/cuda
-SUMI_PATH ?= ../libsumi
+SUMI_REPO ?= https://github.com/crux161/libsumi.git
+SUMI_VENDOR_DIR ?= libsumi
+SUMI_REF ?=
+PKG_CONFIG ?= pkg-config
+empty :=
+space := $(empty) $(empty)
+
+ifeq ($(origin SUMI_PATH), undefined)
+ifneq ($(wildcard $(SUMI_VENDOR_DIR)/include/sumi/sumi.h),)
+SUMI_PATH := $(SUMI_VENDOR_DIR)
+else
+SUMI_PATH := ../libsumi
+endif
+endif
+
+SUMI_INCLUDE_DIR := $(SUMI_PATH)/include
+SUMI_HEADER := $(SUMI_INCLUDE_DIR)/sumi/sumi.h
+SUMI_CPPFLAGS := -I. -I$(SUMI_INCLUDE_DIR)
+
+BUILD_GOALS := $(filter-out vendor clean,$(MAKECMDGOALS))
+ifeq ($(MAKECMDGOALS),)
+BUILD_GOALS := all
+endif
+
+ifneq ($(BUILD_GOALS),)
+ifeq ($(wildcard $(SUMI_HEADER)),)
+$(error libsumi headers not found at $(SUMI_HEADER). Run './vendor.sh' to fetch libsumi, or pass SUMI_PATH=/path/to/libsumi)
+endif
+endif
 
 ifeq ($(OS),Windows_NT)
     detected_OS := Windows
@@ -14,12 +40,12 @@ CXX       = g++
 BUILD_DIR = build
 LOG_DIR	  = logs
 
-CXXFLAGS  = -fPIE -pie -std=c++11 -I. -I$(SUMI_PATH)/include -fopenmp -O3 -Wall -Wextra -flto -DLINK_SHADER
+CXXFLAGS  = -fPIE -pie -std=c++11 $(SUMI_CPPFLAGS) -fopenmp -O3 -Wall -Wextra -flto -DLINK_SHADER
 OMP_LIB   = -lgomp
 EXE_EXT   =
 RM_CMD    = rm -rf
 
-NVCC_FLAGS = -O3 -I. -I$(SUMI_PATH)/include
+NVCC_FLAGS = -O3 $(SUMI_CPPFLAGS)
 
 NVCC_PATH := $(shell which nvcc 2>/dev/null)
 ifeq ($(NVCC_PATH),)
@@ -56,15 +82,33 @@ endif
 
 ifeq ($(detected_OS),Darwin)
     CXX         = clang++
-    BREW_PREFIX := $(shell brew --prefix libomp)
-    CXXFLAGS    = -std=c++11 -I. -I$(SUMI_PATH)/include -Xpreprocessor -fopenmp -I$(BREW_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
-    OMP_LIB     = -L$(BREW_PREFIX)/lib -lomp
+    HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null)
+    LIBOMP_PREFIX := $(shell brew --prefix libomp)
+    MACOS_MAJOR := $(shell sw_vers -productVersion 2>/dev/null | cut -d. -f1)
+    HOMEBREW_OS_PKG_CONFIG_DIRS := $(wildcard $(HOMEBREW_PREFIX)/Library/Homebrew/os/mac/pkgconfig/$(MACOS_MAJOR))
+    HOMEBREW_OS_PKG_CONFIG_DIRS := $(if $(HOMEBREW_OS_PKG_CONFIG_DIRS),$(HOMEBREW_OS_PKG_CONFIG_DIRS),$(wildcard $(HOMEBREW_PREFIX)/Library/Homebrew/os/mac/pkgconfig/*))
+    HOMEBREW_PKG_CONFIG_DIRS := $(wildcard $(foreach formula,zlib bzip2 libpng freetype harfbuzz glib gettext pcre2 graphite2 ffmpeg sdl2 sdl2_ttf,$(HOMEBREW_PREFIX)/opt/$(formula)/lib/pkgconfig) $(HOMEBREW_PREFIX)/lib/pkgconfig $(HOMEBREW_PREFIX)/share/pkgconfig) $(HOMEBREW_OS_PKG_CONFIG_DIRS)
+    HOMEBREW_PKG_CONFIG_PATH := $(subst $(space),:,$(strip $(HOMEBREW_PKG_CONFIG_DIRS)))
+    PKG_CONFIG_PATH := $(HOMEBREW_PKG_CONFIG_PATH)$(if $(PKG_CONFIG_PATH),:$(PKG_CONFIG_PATH))
+    export PKG_CONFIG_PATH
+    CXXFLAGS    = -std=c++11 $(SUMI_CPPFLAGS) -Xpreprocessor -fopenmp -I$(LIBOMP_PREFIX)/include -O3 -Wall -Wextra -flto -DLINK_SHADER
+    OMP_LIB     = -L$(LIBOMP_PREFIX)/lib -lomp
 endif
 
 
 PKGS     = sdl2 SDL2_ttf libavcodec libavformat libavutil libswscale
-CXXFLAGS += $(shell pkg-config --cflags $(PKGS))
-LDFLAGS  = $(shell pkg-config --libs $(PKGS)) $(LDFLAGS_EXTRA) $(LDFLAGS_CUDA)
+PKG_CONFIG_CMD = PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" $(PKG_CONFIG)
+
+ifneq ($(BUILD_GOALS),)
+PKG_CONFIG_ERRORS := $(shell $(PKG_CONFIG_CMD) --print-errors --exists $(PKGS) 2>&1 || true)
+ifneq ($(strip $(PKG_CONFIG_ERRORS)),)
+$(error pkg-config could not resolve required packages: $(PKGS). $(PKG_CONFIG_ERRORS). PKG_CONFIG_PATH=$(PKG_CONFIG_PATH))
+endif
+CXXFLAGS += $(shell $(PKG_CONFIG_CMD) --cflags $(PKGS))
+LDFLAGS  = $(shell $(PKG_CONFIG_CMD) --libs $(PKGS)) $(LDFLAGS_EXTRA) $(LDFLAGS_CUDA)
+else
+LDFLAGS  = $(LDFLAGS_EXTRA) $(LDFLAGS_CUDA)
+endif
 
 
 MAIN_OBJ = main.o
@@ -73,6 +117,9 @@ EXAMPLE_BINS := $(patsubst examples/%.cpp, $(BUILD_DIR)/%$(EXE_EXT), $(EXAMPLE_S
 
 
 all: print_status $(BUILD_DIR)/eshi$(EXE_EXT) examples
+
+vendor:
+	@SUMI_REPO="$(SUMI_REPO)" SUMI_VENDOR_DIR="$(SUMI_VENDOR_DIR)" SUMI_REF="$(SUMI_REF)" ./vendor.sh
 
 print_status:
 	@echo $(STATUS_MSG)
@@ -123,4 +170,4 @@ clean:
 	$(RM_CMD) *.o *.mp4
 	$(RM_CMD) $(LOG_DIR)
 
-.PHONY: all clean examples print_status
+.PHONY: all clean examples print_status vendor
