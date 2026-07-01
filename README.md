@@ -9,9 +9,10 @@
 ### 🖼️ Showcase
 ||||
 |:---:|:---:|:---:|
-| **Deep Sea**<br>![Deep Sea](resources/deepsea.gif) | **Fractal**<br>![Fractal](resources/fractal.gif) | **Polar**<br>![Polar](resources/polar.gif) |
-| **Raymarch**<br>![Raymarch](resources/raymarch.gif) | **Ripple**<br>![Ripple](resources/ripple.gif) | **Starfield**<br>![Starfield](resources/starfield.gif) |
-| **Tzozen**<br>![Tzozen](resources/tzozen.gif) | **Voronoi**<br>![Voronoi](resources/voronoi.gif) | **Bubbles**<br>![Bubbles](resources/bubbles.gif) | 
+| **Aurora**<br>![Aurora](resources/aurora.gif) | **Deep Sea**<br>![Deep Sea](resources/deepsea.gif) | **Fractal**<br>![Fractal](resources/fractal.gif) |
+| **Polar**<br>![Polar](resources/polar.gif) | **Raymarch**<br>![Raymarch](resources/raymarch.gif) | **Ripple**<br>![Ripple](resources/ripple.gif) |
+| **Starfield**<br>![Starfield](resources/starfield.gif) | **Tzozen**<br>![Tzozen](resources/tzozen.gif) | **Voronoi**<br>![Voronoi](resources/voronoi.gif) |
+| **Bubbles**<br>![Bubbles](resources/bubbles.gif) | **Neon**<br>![Neon](resources/neon.gif) | **Seascape**<br>![Seascape](resources/seascape.gif) |
 
 
 
