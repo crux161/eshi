@@ -14,6 +14,10 @@
     #include "renderer_gpu.h"
 #endif
 
+#ifdef USE_METAL
+    #include "renderer_metal.h"
+#endif
+
 #include <SDL2/SDL.h>
 #include <string>
 #include <iostream>
@@ -89,9 +93,15 @@ int main(int argc, char** argv) {
     bool live_mode = false;
     std::string output_name = "output.mp4";
 
+    std::string shader_path = "shader.cpp";
     if (argc > 0) {
         std::string bin_name = get_filename(argv[0]);
-        if (!bin_name.empty()) output_name = bin_name + ".mp4";
+        if (!bin_name.empty()) {
+            output_name = bin_name + ".mp4";
+            if (bin_name != "eshi") {
+                shader_path = "examples/" + bin_name + ".cpp";
+            }
+        }
     }
 
     for(int i=1; i<argc; i++){
@@ -163,6 +173,10 @@ int main(int argc, char** argv) {
     #ifdef USE_CUDA
     GpuRenderer* gpu_renderer = nullptr;
     #endif
+
+    #ifdef USE_METAL
+    MetalRenderer* metal_renderer = nullptr;
+    #endif
     
     if (use_gpu) {
         bool gpu_init = false;
@@ -175,8 +189,16 @@ int main(int argc, char** argv) {
 
         #ifdef USE_OPENGL
         if (!gpu_init) { 
-            printf("Initializing OpenGL Renderer with source: %s\n", SHADER_PATH);
-            gl_renderer = new GlRenderer(W, H, SHADER_PATH, texData, tw, th);
+            printf("Initializing OpenGL Renderer with source: %s\n", shader_path.c_str());
+            gl_renderer = new GlRenderer(W, H, shader_path.c_str(), texData, tw, th);
+            gpu_init = true;
+        }
+        #endif
+
+	#ifdef USE_METAL
+        if (!gpu_init) {
+            printf("Initializing Metal Renderer with source: %s\n", shader_path.c_str());
+            metal_renderer = new MetalRenderer(W, H, shader_path.c_str(), texData, tw, th);
             gpu_init = true;
         }
         #endif
@@ -210,14 +232,20 @@ int main(int argc, char** argv) {
             }
             
             #ifdef USE_CUDA
-            if (gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
-            else 
+                if (gpu_renderer){ gpu_renderer->renderFrame(pixels, stride, time); }
+                   else
             #endif
             #ifdef USE_OPENGL
-            if (gl_renderer) gl_renderer->renderFrame(pixels, stride, time);
-            else 
+                if (gl_renderer){ gl_renderer->renderFrame(pixels, stride, time); }
+                   else
             #endif
-            if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
+
+	    #ifdef USE_METAL
+	        if (metal_renderer){ metal_renderer->renderFrame(pixels, stride, time); }
+	            else
+	    #endif
+
+            if (cpu_renderer){ cpu_renderer->renderFrame(pixels, stride, time); }
             
             window.submit_frame();
 
@@ -243,6 +271,10 @@ int main(int argc, char** argv) {
             #ifdef USE_OPENGL
             if (gl_renderer) gl_renderer->renderFrame(pixels, stride, time);
             else 
+            #endif
+            #ifdef USE_METAL
+            if (metal_renderer) metal_renderer->renderFrame(pixels, stride, time);
+            else
             #endif
             if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
 

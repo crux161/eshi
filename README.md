@@ -101,6 +101,58 @@ make -j$(sysctl -n hw.ncpu)
 ```
 The Makefile automatically prepends Homebrew `pkg-config` paths for keg-only and macOS shim dependencies such as `zlib` and `bzip2`.
 
+The Makefile uses `zig c++` by default. (`zig cc` can infer C++ from a `.cpp`
+input, but it does not select the C++ runtime when it performs the final link.)
+You can still select another C++ compiler explicitly:
+
+```bash
+make CXX=clang++
+```
+
+#### Independent Zig build
+
+The native Zig build graph produces the same main program and examples under
+`zig-out/bin`:
+
+```bash
+# Everything, optimized with ReleaseFast by default
+zig build
+
+# Only one artifact
+zig build eshi
+zig build warp
+
+# Useful overrides
+zig build eshi -Doptimize=Debug -Dopenmp=false
+zig build eshi -Dsumi-path=../libsumi
+```
+
+Both build paths use `pkg-config` for SDL2 and FFmpeg. On macOS, the Zig build
+enables Metal and uses Homebrew's `libomp`; override a nonstandard installation
+with `-Dlibomp-prefix=/path/to/libomp`.
+Outside macOS the Zig build currently exercises the CPU/OpenMP path; CUDA
+auto-detection remains in the Makefile path.
+
+Zig 0.16 cannot use LTO for Mach-O: Zig requires LLD for LTO, while its LLD
+backend cannot link Mach-O. Consequently, both Zig-based paths disable LTO on
+macOS. `-fuse-ld=lld` does not work around this. On other platforms LTO remains
+enabled by default; disable it with `make USE_LTO=0` or `zig build -Dlto=false`.
+
+For isolated build/runtime benchmarks, use different prefixes so neither path
+can reuse or overwrite the other's artifacts:
+
+```bash
+make BUILD_DIR=build-make -j$(sysctl -n hw.ncpu)
+zig build -p build-zig
+
+# Example with hyperfine installed; benchmark the same renderer and arguments.
+hyperfine './build-make/warp --res 320x180' './build-zig/bin/warp --res 320x180'
+```
+
+For cold build-time measurements, also give each command a different
+`ZIG_GLOBAL_CACHE_DIR`; separate output directories do not separate Zig's
+compiler cache.
+
 #### 🪟 Windows (x64)
 
 **1. Prerequisites:**
