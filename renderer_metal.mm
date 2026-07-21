@@ -6,6 +6,7 @@
 #include <sstream>
 #include <regex>
 #include <sys/stat.h>
+#include <stdexcept>
 
 // --- Helper to convert C++ string to NSString ---
 static NSString* toNSString(const std::string& str) {
@@ -36,8 +37,7 @@ static std::string replaceAll(std::string str, const std::string& from, const st
 static std::string readFile(std::string path) {
     std::string cleanPath = resolvePath(path);
     if (cleanPath.empty()) {
-        std::cerr << "[Metal ERROR] File not found: " << path << std::endl;
-        exit(1);
+        throw std::runtime_error("Metal shader file not found: " + path);
     }
 
     std::ifstream f(cleanPath);
@@ -85,8 +85,7 @@ MetalRenderer::MetalRenderer(int w, int h, const char* shaderPath, float* texDat
     // 1. Initialize Metal Device & Command Queue
     id<MTLDevice> mtlDevice = MTLCreateSystemDefaultDevice();
     if (!mtlDevice) {
-        std::cerr << "[FATAL] Metal is not supported on this device." << std::endl;
-        exit(1);
+        throw std::runtime_error("Metal is not supported on this device");
     }
     
     device = (__bridge_retained void*)mtlDevice;
@@ -152,14 +151,19 @@ MetalRenderer::MetalRenderer(int w, int h, const char* shaderPath, float* texDat
                                                      options:options 
                                                        error:&error];
     if (!library) {
-        std::cerr << "[Metal ERROR] Shader compilation failed:\n" 
-                  << [[error localizedDescription] UTF8String] << std::endl;
-        exit(1);
+        throw std::runtime_error(
+            "Metal shader compilation failed: " +
+            std::string([[error localizedDescription] UTF8String]));
     }
 
     // 4. Create Compute Pipeline State
     id<MTLFunction> computeFunction = [library newFunctionWithName:@"computeMain"];
     id<MTLComputePipelineState> pso = [mtlDevice newComputePipelineStateWithFunction:computeFunction error:&error];
+    if (!pso) {
+        throw std::runtime_error(
+            "Metal pipeline creation failed: " +
+            std::string([[error localizedDescription] UTF8String]));
+    }
     pipelineState = (__bridge_retained void*)pso;
 
     // 5. Setup Textures and Output Buffers
@@ -174,15 +178,31 @@ MetalRenderer::MetalRenderer(int w, int h, const char* shaderPath, float* texDat
     id<MTLTexture> mtlOutputTexture = [mtlDevice newTextureWithDescriptor:texDesc];
     this->outputTexture = (__bridge_retained void*)mtlOutputTexture;
     
-    // Setup iChannel0 user texture if provided (similar to OpenGL init)
-    if (texData) {
-        // Create an input MTLTexture and copy texData into it
-    }
+    // Set up iChannel0. A one-pixel black texture keeps the binding valid for
+    // shaders that do not use an input image.
+    const int inputWidth = texData ? texW : 1;
+    const int inputHeight = texData ? texH : 1;
+    MTLTextureDescriptor* inputDesc = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
+                                     width:inputWidth
+                                    height:inputHeight
+                                 mipmapped:NO];
+    inputDesc.usage = MTLTextureUsageShaderRead;
+    id<MTLTexture> inputTexture = [mtlDevice newTextureWithDescriptor:inputDesc];
+    const float blackPixel[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    const float* inputPixels = texData ? texData : blackPixel;
+    [inputTexture replaceRegion:MTLRegionMake2D(0, 0, inputWidth, inputHeight)
+                    mipmapLevel:0
+                      withBytes:inputPixels
+                    bytesPerRow:inputWidth * 4 * sizeof(float)];
+    texture = (__bridge_retained void*)inputTexture;
     
     // Allocate CPU-accessible buffer to read results back
     NSUInteger bufferSize = width * height * 4; // RGBA 8-bit
     id<MTLBuffer> readbackBuffer = [mtlDevice newBufferWithLength:bufferSize options:MTLResourceStorageModeShared];
     outputBuffer = (__bridge_retained void*)readbackBuffer;
+
+    std::cout << "[Metal] Ready." << std::endl;
 }
 
 MetalRenderer::~MetalRenderer() {
@@ -200,7 +220,7 @@ void MetalRenderer::renderFrame(uint8_t* pixelBuffer, int stride, float time) {
     id<MTLComputePipelineState> pso = (__bridge id<MTLComputePipelineState>)pipelineState;
     id<MTLBuffer> mtlOutputBuffer = (__bridge id<MTLBuffer>)outputBuffer;
     id<MTLTexture> mtlOutputTexture = (__bridge id<MTLTexture>)outputTexture;
-    // ... get your texture ...
+    id<MTLTexture> mtlInputTexture = (__bridge id<MTLTexture>)texture;
 
     @autoreleasepool {
         id<MTLCommandBuffer> commandBuffer = [mtlQueue commandBuffer];
@@ -211,7 +231,7 @@ void MetalRenderer::renderFrame(uint8_t* pixelBuffer, int stride, float time) {
         // Bind uniforms and textures
         [encoder setBytes:&time length:sizeof(float) atIndex:0];
         [encoder setTexture:mtlOutputTexture atIndex:0];
-        // [encoder setTexture:mtlInputTexture atIndex:1];
+        [encoder setTexture:mtlInputTexture atIndex:1];
 
         // Dispatch Threads
         MTLSize gridSize = MTLSizeMake(width, height, 1);
@@ -238,7 +258,17 @@ void MetalRenderer::renderFrame(uint8_t* pixelBuffer, int stride, float time) {
         [commandBuffer commit];
         [commandBuffer waitUntilCompleted];
         
-        // Copy the data from the Metal buffer into the SDL/Encoder pixelBuffer
-        memcpy(pixelBuffer, [mtlOutputBuffer contents], width * height * 4);
+        // Copy the tightly packed Metal buffer into the SDL/encoder layout.
+        const uint8_t* source = static_cast<const uint8_t*>([mtlOutputBuffer contents]);
+        const size_t sourceStride = static_cast<size_t>(width) * 4;
+        if (static_cast<size_t>(stride) == sourceStride) {
+            memcpy(pixelBuffer, source, sourceStride * height);
+        } else {
+            for (int y = 0; y < height; ++y) {
+                memcpy(pixelBuffer + static_cast<size_t>(y) * stride,
+                       source + static_cast<size_t>(y) * sourceStride,
+                       sourceStride);
+            }
+        }
     }
 }

@@ -13,6 +13,8 @@ endif
 BUILD_DIR ?= build
 OBJ_DIR := $(BUILD_DIR)/obj
 LOG_DIR ?= logs
+ZIG_CACHE_DIR ?= .zig-cache
+ZIG_OUT_DIR ?= zig-out
 USE_LTO ?= auto
 
 empty :=
@@ -48,6 +50,7 @@ endif
 
 CXX_PROGRAM := $(notdir $(firstword $(CXX)))
 CXX_IS_ZIG := $(if $(findstring zig,$(CXX_PROGRAM)),1,0)
+ZIG_CMD := $(firstword $(CXX))
 
 # Zig 0.16's macOS C/C++ driver uses Apple's linker. It rejects -flto because
 # Zig LTO requires LLD, and -fuse-ld=lld does not switch the driver to LLD.
@@ -126,14 +129,14 @@ USE_GPU := 1
 GPU_BACKEND := Metal
 PROJECT_CPPFLAGS += -DUSE_METAL -I$(LIBOMP_PREFIX)/include
 PROJECT_CXXFLAGS += -Xpreprocessor -fopenmp
-PROJECT_LDFLAGS += -framework Metal -framework Foundation -framework QuartzCore -Wno-nullability-completeness
+PROJECT_LDFLAGS += -framework Metal -framework Foundation -framework QuartzCore -framework Cocoa -Wno-nullability-completeness
 OMP_LIB := -L$(LIBOMP_PREFIX)/lib -lomp
 else
 PROJECT_CXXFLAGS += -fopenmp
 endif
 
 ifeq ($(USE_GPU),0)
-STATUS_MSG := ⚠️  No GPU compiler/backend found. Building CPU-only engine.
+STATUS_MSG := ⚠  No GPU compiler/backend found. Building CPU-only engine.
 else
 STATUS_MSG := ✅ Building CPU + $(GPU_BACKEND) engine.
 endif
@@ -154,9 +157,15 @@ MAIN_OBJ := $(OBJ_DIR)/main.o
 SHADER_OBJ := $(OBJ_DIR)/shader.o
 METAL_OBJ := $(OBJ_DIR)/renderer_metal.o
 GPU_OBJ := $(OBJ_DIR)/renderer_gpu.o
-EXAMPLE_SRCS := $(wildcard examples/*.cpp)
-EXAMPLE_OBJS := $(patsubst examples/%.cpp,$(OBJ_DIR)/examples/%.o,$(EXAMPLE_SRCS))
-EXAMPLE_BINS := $(patsubst examples/%.cpp,$(BUILD_DIR)/%$(EXE_EXT),$(EXAMPLE_SRCS))
+
+# Detect both C++ and Zig examples
+EXAMPLE_CPP_SRCS := $(wildcard examples/*.cpp)
+EXAMPLE_ZIG_SRCS := $(wildcard examples/*.zig)
+
+# Derive binary targets for both
+CPP_EXAMPLE_BINS := $(patsubst examples/%.cpp,$(BUILD_DIR)/%$(EXE_EXT),$(EXAMPLE_CPP_SRCS))
+ZIG_EXAMPLE_BINS := $(patsubst examples/%.zig,$(BUILD_DIR)/%$(EXE_EXT),$(EXAMPLE_ZIG_SRCS))
+EXAMPLE_BINS := $(CPP_EXAMPLE_BINS) $(ZIG_EXAMPLE_BINS)
 
 ifeq ($(USE_GPU),1)
 ifeq ($(detected_OS),Darwin)
@@ -187,6 +196,12 @@ print_config:
 $(BUILD_DIR) $(OBJ_DIR) $(OBJ_DIR)/examples:
 	@mkdir -p $@
 
+shader.cpp:
+	@if [ ! -f shader.cpp ]; then \
+		echo "Creating default shader.cpp from examples/aurora.cpp..."; \
+		cp examples/aurora.cpp shader.cpp 2>/dev/null || touch shader.cpp; \
+	fi
+
 $(BUILD_DIR)/eshi$(EXE_EXT): $(MAIN_OBJ) $(SHADER_OBJ) $(PLATFORM_OBJ) | $(BUILD_DIR)
 	$(CXX) $(PROJECT_LDFLAGS) $(LDFLAGS) $^ -o $@ $(PROJECT_LDLIBS) $(LDLIBS)
 
@@ -202,17 +217,32 @@ $(GPU_OBJ): renderer_gpu.cu renderer_gpu.h | $(OBJ_DIR)
 	$(NVCC_PATH) $(NVCC_FLAGS) -DSHADER_PATH='"shader.cpp"' -c $< -o $@
 
 $(METAL_OBJ): renderer_metal.mm renderer_metal.h | $(OBJ_DIR)
-	$(CXX) $(PROJECT_CPPFLAGS) $(CPPFLAGS) $(PROJECT_CXXFLAGS) $(CXXFLAGS) -fobjc-arc -c $< -o $@
+	$(CXX) $(PROJECT_CPPFLAGS) $(CPPFLAGS) $(PROJECT_CXXFLAGS) $(CXXFLAGS) -x objective-c++ -fobjc-arc -c $< -o $@
 
+# C++ Example Rule
 $(OBJ_DIR)/examples/%.o: examples/%.cpp | $(OBJ_DIR)/examples
 	$(CXX) $(PROJECT_CPPFLAGS) $(CPPFLAGS) $(PROJECT_CXXFLAGS) $(CXXFLAGS) -c $< -o $@
 
+# Zig Example Rule
+$(OBJ_DIR)/examples/%.o: examples/%.zig | $(OBJ_DIR)/examples
+	$(ZIG_CMD) build-obj $< -femit-bin=$@ -O ReleaseFast
+
+# C++ CUDA Wrapper
 $(OBJ_DIR)/examples/%_gpu.o: renderer_gpu.cu examples/%.cpp | $(OBJ_DIR)/examples
 	$(NVCC_PATH) $(NVCC_FLAGS) -DSHADER_PATH='"examples/$*.cpp"' -c $< -o $@
 
+# Zig shaders use a portable GPU companion because CUDA cannot execute a host
+# Zig object directly. Metal/OpenGL consume the same companion at runtime.
+ZIG_EXAMPLE_GPU_OBJS := $(patsubst examples/%.zig,$(OBJ_DIR)/examples/%_gpu.o,$(EXAMPLE_ZIG_SRCS))
+$(ZIG_EXAMPLE_GPU_OBJS): $(OBJ_DIR)/examples/%_gpu.o: renderer_gpu.cu examples/gpu/%.cpp | $(OBJ_DIR)/examples
+	$(NVCC_PATH) $(NVCC_FLAGS) -DSHADER_PATH='"examples/gpu/$*.cpp"' -c $< -o $@
+
 ifeq ($(USE_GPU),1)
 ifeq ($(detected_OS),Darwin)
-$(BUILD_DIR)/%$(EXE_EXT): $(OBJ_DIR)/examples/%.o $(MAIN_OBJ) $(METAL_OBJ) | $(BUILD_DIR)
+$(CPP_EXAMPLE_BINS): $(BUILD_DIR)/%$(EXE_EXT): $(OBJ_DIR)/examples/%.o $(MAIN_OBJ) $(METAL_OBJ) | $(BUILD_DIR)
+	$(CXX) $(PROJECT_LDFLAGS) $(LDFLAGS) $^ -o $@ $(PROJECT_LDLIBS) $(LDLIBS)
+
+$(ZIG_EXAMPLE_BINS): $(BUILD_DIR)/%$(EXE_EXT): $(OBJ_DIR)/examples/%.o $(MAIN_OBJ) $(METAL_OBJ) | $(BUILD_DIR) examples/gpu/%.cpp
 	$(CXX) $(PROJECT_LDFLAGS) $(LDFLAGS) $^ -o $@ $(PROJECT_LDLIBS) $(LDLIBS)
 else
 $(BUILD_DIR)/%$(EXE_EXT): $(OBJ_DIR)/examples/%.o $(MAIN_OBJ) $(OBJ_DIR)/examples/%_gpu.o | $(BUILD_DIR)
@@ -224,7 +254,7 @@ $(BUILD_DIR)/%$(EXE_EXT): $(OBJ_DIR)/examples/%.o $(MAIN_OBJ) | $(BUILD_DIR)
 endif
 
 clean:
-	$(RM_CMD) $(BUILD_DIR) $(LOG_DIR)
+	$(RM_CMD) $(BUILD_DIR) $(LOG_DIR) $(ZIG_CACHE_DIR) $(ZIG_OUT_DIR)
 
 .SECONDARY:
 .PHONY: all clean examples print_status print_config vendor

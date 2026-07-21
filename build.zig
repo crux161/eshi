@@ -6,6 +6,7 @@ const example_sources = [_][]const u8{
     "examples/deepsea.cpp",
     "examples/fractal.cpp",
     "examples/funky.cpp",
+    "examples/harlequin.zig",
     "examples/lunar.cpp",
     "examples/mario.cpp",
     "examples/neon.cpp",
@@ -145,8 +146,9 @@ fn addEshiExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
     else
         &.{ "-std=c++11", "-Wall", "-Wextra" };
 
+    const zig_shader = std.mem.eql(u8, std.fs.path.extension(options.shader_source), ".zig");
     module.addCSourceFiles(.{
-        .files = &.{ "main.cpp", options.shader_source },
+        .files = if (zig_shader) &.{"main.cpp"} else &.{ "main.cpp", options.shader_source },
         .flags = cpp_flags,
         .language = .cpp,
     });
@@ -194,6 +196,18 @@ fn addEshiExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
         .use_llvm = true,
         .use_lld = if (options.use_lto) true else null,
     });
+    if (zig_shader) {
+        const shader_module = b.createModule(.{
+            .root_source_file = b.path(options.shader_source),
+            .target = options.target,
+            .optimize = options.optimize,
+        });
+        const shader_object = b.addObject(.{
+            .name = b.fmt("{s}-shader", .{options.name}),
+            .root_module = shader_module,
+        });
+        exe.root_module.addObject(shader_object);
+    }
     exe.lto = if (options.use_lto) .full else .none;
 
     return b.addInstallArtifact(exe, .{});
