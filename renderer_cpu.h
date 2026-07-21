@@ -1,7 +1,10 @@
 #pragma once
 #include <sumi/sumi.h>
-#include <omp.h>
 #include <algorithm> 
+
+#ifdef _OPENMP
+    #include <omp.h>
+#endif
 
 using namespace sumi;
 

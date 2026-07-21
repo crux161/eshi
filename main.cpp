@@ -14,6 +14,10 @@
     #include "renderer_gpu.h"
 #endif
 
+#ifdef USE_METAL
+    #include "renderer_metal.h"
+#endif
+
 #include <SDL2/SDL.h>
 #include <string>
 #include <iostream>
@@ -21,6 +25,8 @@
 #include <chrono>
 #include <atomic>
 #include <cmath> 
+#include <exception>
+#include <sys/stat.h>
 
 using namespace sumi;
 
@@ -74,6 +80,43 @@ std::string get_filename(std::string path) {
     return path;
 }
 
+static bool file_exists(const std::string& path) {
+    struct stat info;
+    return stat(path.c_str(), &info) == 0 && (info.st_mode & S_IFREG) != 0;
+}
+
+static std::string get_directory(const std::string& path) {
+    const size_t slash = path.find_last_of("\\/");
+    return slash == std::string::npos ? "." : path.substr(0, slash);
+}
+
+static std::string resolve_source_path(const std::string& path, const std::string& executable_path) {
+    const std::string executable_dir = get_directory(executable_path);
+    const std::string candidates[] = {
+        path,
+        "../" + path,
+        executable_dir + "/../" + path,
+        executable_dir + "/../../" + path,
+    };
+
+    for (const std::string& candidate : candidates) {
+        if (file_exists(candidate)) return candidate;
+    }
+    return "";
+}
+
+static std::string find_gpu_shader(const std::string& binary_name, const std::string& executable_path) {
+    if (binary_name == "eshi") {
+        return resolve_source_path("shader.cpp", executable_path);
+    }
+
+    // A sidecar lets shaders implemented in another host language (for example
+    // Zig) provide the portable C++/GLSL subset consumed by GPU backends.
+    std::string path = resolve_source_path("examples/gpu/" + binary_name + ".cpp", executable_path);
+    if (!path.empty()) return path;
+    return resolve_source_path("examples/" + binary_name + ".cpp", executable_path);
+}
+
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
@@ -89,10 +132,15 @@ int main(int argc, char** argv) {
     bool live_mode = false;
     std::string output_name = "output.mp4";
 
+    std::string bin_name = "eshi";
     if (argc > 0) {
-        std::string bin_name = get_filename(argv[0]);
-        if (!bin_name.empty()) output_name = bin_name + ".mp4";
+        bin_name = get_filename(argv[0]);
+        if (!bin_name.empty()) {
+            output_name = bin_name + ".mp4";
+        }
     }
+
+    const std::string shader_path = find_gpu_shader(bin_name, argc > 0 ? argv[0] : "eshi");
 
     for(int i=1; i<argc; i++){
         std::string arg = argv[i];
@@ -163,6 +211,10 @@ int main(int argc, char** argv) {
     #ifdef USE_CUDA
     GpuRenderer* gpu_renderer = nullptr;
     #endif
+
+    #ifdef USE_METAL
+    MetalRenderer* metal_renderer = nullptr;
+    #endif
     
     if (use_gpu) {
         bool gpu_init = false;
@@ -175,14 +227,40 @@ int main(int argc, char** argv) {
 
         #ifdef USE_OPENGL
         if (!gpu_init) { 
-            printf("Initializing OpenGL Renderer with source: %s\n", SHADER_PATH);
-            gl_renderer = new GlRenderer(W, H, SHADER_PATH, texData, tw, th);
-            gpu_init = true;
+            if (shader_path.empty()) {
+                fprintf(stderr,
+                        "[OpenGL ERROR] No GPU shader source for '%s'. Expected "
+                        "examples/gpu/%s.cpp or examples/%s.cpp.\n",
+                        bin_name.c_str(), bin_name.c_str(), bin_name.c_str());
+            } else {
+                printf("Initializing OpenGL Renderer with shader: %s\n", shader_path.c_str());
+                gl_renderer = new GlRenderer(W, H, shader_path.c_str(), texData, tw, th);
+                gpu_init = true;
+            }
+        }
+        #endif
+
+	#ifdef USE_METAL
+        if (!gpu_init) {
+            if (shader_path.empty()) {
+                fprintf(stderr,
+                        "[Metal ERROR] No GPU shader source for '%s'. Expected "
+                        "examples/gpu/%s.cpp or examples/%s.cpp.\n",
+                        bin_name.c_str(), bin_name.c_str(), bin_name.c_str());
+            } else {
+                printf("Initializing Metal Renderer with shader: %s\n", shader_path.c_str());
+                try {
+                    metal_renderer = new MetalRenderer(W, H, shader_path.c_str(), texData, tw, th);
+                    gpu_init = true;
+                } catch (const std::exception& error) {
+                    fprintf(stderr, "[Metal ERROR] %s\n", error.what());
+                }
+            }
         }
         #endif
 
         if (!gpu_init) {
-            printf("⚠️  GPU requested but no GPU backend was compiled. Falling back to CPU.\n");
+            printf("⚠️  GPU renderer unavailable for this shader. Falling back to CPU.\n");
             cpu_renderer = new CpuRenderer(W, H);
         }
     } else {
@@ -210,14 +288,20 @@ int main(int argc, char** argv) {
             }
             
             #ifdef USE_CUDA
-            if (gpu_renderer) gpu_renderer->renderFrame(pixels, stride, time);
-            else 
+                if (gpu_renderer){ gpu_renderer->renderFrame(pixels, stride, time); }
+                   else
             #endif
             #ifdef USE_OPENGL
-            if (gl_renderer) gl_renderer->renderFrame(pixels, stride, time);
-            else 
+                if (gl_renderer){ gl_renderer->renderFrame(pixels, stride, time); }
+                   else
             #endif
-            if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
+
+	    #ifdef USE_METAL
+	        if (metal_renderer){ metal_renderer->renderFrame(pixels, stride, time); }
+	            else
+	    #endif
+
+            if (cpu_renderer){ cpu_renderer->renderFrame(pixels, stride, time); }
             
             window.submit_frame();
 
@@ -244,6 +328,10 @@ int main(int argc, char** argv) {
             if (gl_renderer) gl_renderer->renderFrame(pixels, stride, time);
             else 
             #endif
+            #ifdef USE_METAL
+            if (metal_renderer) metal_renderer->renderFrame(pixels, stride, time);
+            else
+            #endif
             if (cpu_renderer) cpu_renderer->renderFrame(pixels, stride, time);
 
             video.submit_frame();
@@ -257,6 +345,9 @@ int main(int argc, char** argv) {
     #endif
     #ifdef USE_CUDA
     if (gpu_renderer) delete gpu_renderer;
+    #endif
+    #ifdef USE_METAL
+    if (metal_renderer) delete metal_renderer;
     #endif
     if (vecData) delete[] vecData;
     
