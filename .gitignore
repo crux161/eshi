@@ -19,7 +19,10 @@ clean.py
 VENDORED
 sumi
 /libsumi/
-vendor.sh
+
+# --- res ---
+resources/gl3d/
+resources/gl2d/
 
 # vcpkg
 vcpkg_installed/
