@@ -5,6 +5,7 @@
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <cstring>
 #include <sys/stat.h>
 
 
@@ -70,6 +71,8 @@ class GlRenderer {
     GLuint fbo, fbo_texture;
     GLuint vbo, vao;
     GLuint user_texture = 0;
+    // Tightly packed readback staging, so the row flip costs no per-frame alloc.
+    std::vector<uint8_t> readback;
 
     
     PFNGLGENBUFFERS glGenBuffers = nullptr;
@@ -176,6 +179,12 @@ class GlRenderer {
             if(line.find("extern") != std::string::npos) continue; 
             
             line = replaceAll(line, "inline ", "");
+            // Namespace-qualified calls are valid C++ and a syntax error in
+            // GLSL. renderer_metal.mm has always stripped these; this copy of
+            // the transpiler had drifted behind it, so any shader written as
+            // glsl::length(...) failed to compile here while working on Metal.
+            line = replaceAll(line, "glsl::", "");
+            line = replaceAll(line, "sumi::", "");
             line = replaceAll(line, "vec4 &fragColor", "out vec4 fragColor");
             line = replaceAll(line, "vec4 &", "out vec4 ");
             line = replaceAll(line, "if (iChannel0.data == nullptr)", "if (false)");
@@ -319,7 +328,40 @@ public:
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
+        // Read back into scratch, then copy out row by row in reverse.
+        //
+        // Three things this has to get right, all of which the previous
+        // one-line readback got wrong:
+        //
+        //  1. Orientation. glReadPixels returns rows bottom-up — offset 0 is
+        //     the row with the smallest gl_FragCoord.y — while every consumer
+        //     here is top-down, matching CpuRenderer, which writes row 0 from
+        //     the largest fragCoord.y. Copying straight through mirrored the
+        //     image vertically against the CPU renderer.
+        //  2. Format. GL_RGB packs three bytes per pixel, but Display uses
+        //     SDL_PIXELFORMAT_RGBA32 and SimpleEncoder uses AV_PIX_FMT_RGBA,
+        //     both four. The short rows were reinterpreted as four-byte ones,
+        //     which skews the image and shifts the channels.
+        //  3. Stride. The destination pitch was ignored entirely; FFmpeg
+        //     aligns linesize, so it is not always width * 4.
+        //
+        // These survived because USE_OPENGL is only defined by
+        // scripts/build.arm64.bat, so neither the Makefile nor build.zig ever
+        // compiled this path. The Larimar port of this backend
+        // (core/src/render/gl.cpp) carries the same fix; a pixel diff against
+        // the CPU tier is what surfaced it.
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixelBuffer);
+
+        const size_t packed_stride = (size_t)width * 4;
+        const size_t needed = packed_stride * (size_t)height;
+        if (readback.size() != needed) readback.resize(needed);
+
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, readback.data());
+
+        for (int y = 0; y < height; ++y) {
+            memcpy(pixelBuffer + (size_t)y * (size_t)stride,
+                   readback.data() + (size_t)(height - 1 - y) * packed_stride,
+                   packed_stride);
+        }
     }
 };
