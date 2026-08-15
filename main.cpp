@@ -234,8 +234,16 @@ int main(int argc, char** argv) {
                         bin_name.c_str(), bin_name.c_str(), bin_name.c_str());
             } else {
                 printf("Initializing OpenGL Renderer with shader: %s\n", shader_path.c_str());
-                gl_renderer = new GlRenderer(W, H, shader_path.c_str(), texData, tw, th);
-                gpu_init = true;
+                try {
+                    gl_renderer = new GlRenderer(W, H, shader_path.c_str(), texData, tw, th);
+                    gpu_init = true;
+                } catch (const std::exception& error) {
+                    // Leaving gpu_init false drops through to the CPU renderer
+                    // below. A shader this backend cannot build is a reason to
+                    // render it more slowly, not a reason to produce black
+                    // frames or abort.
+                    fprintf(stderr, "[OpenGL ERROR] %s\n", error.what());
+                }
             }
         }
         #endif

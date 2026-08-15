@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <cstring>
+#include <stdexcept>
 #include <sys/stat.h>
 
 
@@ -166,8 +167,10 @@ class GlRenderer {
     std::string readFile(std::string path) {
         std::string cleanPath = resolvePath(path);
         if (cleanPath.empty()) {
-            printf("[GL ERROR] File not found: %s\n", path.c_str());
-            exit(1);
+            // Previously exit(1). A missing shader is the same class of
+            // problem as one that will not compile, and killing the process
+            // denied the caller the CPU fallback it already knows how to do.
+            fail("shader source not found: " + path);
         }
 
         std::ifstream f(cleanPath);
@@ -203,14 +206,35 @@ class GlRenderer {
         return content;
     }
 
-    void checkShader(GLuint shader) {
-        GLint success;
+    // Releases the context and window, then throws.
+    //
+    // A destructor never runs for an object whose constructor threw, so this
+    // is the only chance to hand these back before main.cpp catches and falls
+    // through to the CPU renderer. Same contract MetalRenderer already uses.
+    void fail(const std::string& message) {
+        if (gl_context) { SDL_GL_DeleteContext(gl_context); gl_context = nullptr; }
+        if (hidden_window) { SDL_DestroyWindow(hidden_window); hidden_window = nullptr; }
+        throw std::runtime_error(message);
+    }
+
+    bool shaderCompiled(GLuint shader, std::string& log_out) {
+        GLint success = 0;
         glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-        if (!success) {
-            char infoLog[1024];
-            glGetShaderInfoLog(shader, 1024, NULL, infoLog);
-            std::cerr << "Shader Error:\n" << infoLog << std::endl;
-        }
+        if (success) return true;
+        char infoLog[2048];
+        glGetShaderInfoLog(shader, (GLsizei)sizeof(infoLog), NULL, infoLog);
+        log_out = infoLog;
+        return false;
+    }
+
+    bool programLinked(GLuint prog, std::string& log_out) {
+        GLint success = 0;
+        glGetProgramiv(prog, GL_LINK_STATUS, &success);
+        if (success) return true;
+        char infoLog[2048];
+        glGetProgramInfoLog(prog, (GLsizei)sizeof(infoLog), NULL, infoLog);
+        log_out = infoLog;
+        return false;
     }
 
 public:
@@ -246,6 +270,11 @@ public:
         GLuint vs = glCreateShader(GL_VERTEX_SHADER);
         glShaderSource(vs, 1, &vsSrc, NULL);
         glCompileShader(vs);
+
+        std::string compileLog;
+        if (!shaderCompiled(vs, compileLog)) {
+            fail("vertex shader compilation failed:\n" + compileLog);
+        }
 
         std::string userCode = readFile(shaderPath);
         
@@ -287,12 +316,22 @@ public:
         GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
         glShaderSource(fs, 1, &fsSrcPtr, NULL);
         glCompileShader(fs);
-        checkShader(fs);
+        if (!shaderCompiled(fs, compileLog)) {
+            // The transpiled GLSL is generated, not authored, so the line
+            // numbers in the log refer to text the user cannot open. Name the
+            // source file so the message is actionable.
+            fail("fragment shader compilation failed for " + std::string(shaderPath) +
+                 ":\n" + compileLog);
+        }
 
         program = glCreateProgram();
         glAttachShader(program, vs);
         glAttachShader(program, fs);
         glLinkProgram(program);
+        if (!programLinked(program, compileLog)) {
+            fail("shader program link failed for " + std::string(shaderPath) +
+                 ":\n" + compileLog);
+        }
         glUseProgram(program);
 
         glGenFramebuffers(1, &fbo);
@@ -302,8 +341,10 @@ public:
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fbo_texture, 0);
 
-        if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) printf("[GL] FBO Error\n");
-        else printf("[GL] Ready.\n");
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            fail("framebuffer incomplete");
+        }
+        printf("[GL] Ready.\n");
     }
 
     ~GlRenderer() {
