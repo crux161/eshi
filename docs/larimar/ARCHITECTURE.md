@@ -25,6 +25,40 @@ guarantee, and hands its backend to `matc`.
 
 ---
 
+## 0.5 The target: what Fluorite actually is
+
+From fluorite.game, so the comparison rests on their claims rather than on
+guesses. Fluorite describes itself as *"the first console-grade game engine
+fully integrated with Flutter"*:
+
+| Fluorite | Larimar's answer |
+|---|---|
+| Game code in Dart, Flutter devtools | Same plan (Phase 3) |
+| C++ data-oriented ECS core, *"great performance on lower-end/embedded hardware"* | Same plan (Phase 0, landed) |
+| Rendering by Filament, Vulkan | Filament as the **3D** backend (Phase 1b), not the whole renderer |
+| `FluoriteView` widget, multiple simultaneous views, state shared between entities and widgets | `EshiView` (Phase 3) |
+| **3D Touch Zones** — artists mark clickable regions in Blender, triggering developer-configured events | glTF `extras` → colliders → FFI events (Phase 5). Same feature, independently arrived at. |
+| Hot reload of scenes | Same plan, with the duplicate-entity trap in §6.6 designed around |
+
+The proposal in PROPOSAL.md is, essentially, a specification match. That is
+reassuring about the direction and unhelpful as a strategy: matching feature for
+feature makes Larimar a second-place Fluorite.
+
+**The two things Fluorite structurally cannot have:**
+
+1. **A tier below Filament's floor.** Fluorite is Filament-only, so its
+   hardware floor is Filament's floor. Kantei Grade 1 (Ink) runs with no GPU at
+   all — ESP32, Playdate, headless CI, server-side render farms. That is not a
+   feature Fluorite can add without building a software rasteriser.
+2. **Procedural-art heritage and offline video export.** The 20-shader gallery,
+   the Shadertoy-shaped authoring model, and the zero-IO H.264 pipeline are
+   eshi's existing assets. Nothing in Fluorite's description addresses
+   generative art or headless rendering to file.
+
+Larimar should be pitched as *Fluorite's architecture, one tier lower, with a
+renderer you can also run without a GPU* — not as a clone that happens to be
+newer.
+
 ## 1. Inventory — what actually exists today
 
 Measured, not assumed.
@@ -379,13 +413,64 @@ OS-oblivious rule in §5 has been broken, and the build will say so.
 Not yet done in Phase 0: the gallery still runs through the old `main.cpp` path
 rather than through the core. Both build; they do not yet share a renderer.
 
-### Phase 1 — Filament as a backend
+### Phase 1a — Salvage eshi's own GPU backends — **landed**
+
+Filament is not needed to fill grades 2 and 3 for the fullscreen-material
+model, because eshi already had those backends. `renderer_gl.h`,
+`renderer_metal.mm`, and `renderer_gpu.cu` all exposed the *same*
+`renderFrame(pixels, stride, time)` signature the Ink backend uses — which is
+why `main.cpp` could dispatch between them with nothing but `#ifdef`s.
+
+| Piece | Where | State |
+|---|---|---|
+| Backend vtable + grade registry | `core/src/render/registry.cpp` | Done |
+| Shared C++→GLSL/MSL transpiler | `core/src/render/transpile.cpp` | Done — one copy, was two |
+| Ink (grade 1) | `core/src/render/ink.cpp` | Done |
+| **Paper (grade 2), OpenGL 3.3** | `core/src/render/gl.cpp` | Done |
+| **Brush (grade 3), Metal compute** | `core/src/render/metal.mm` | Done |
+| Gold (grade 4) | — | Stub. CUDA (`renderer_gpu.cu`) is the obvious first candidate. |
+
+Three things came out of this that were not obvious going in:
+
+**The transpiler was duplicated and is now singular.** GL and Metal each carried
+their own `replaceAll` chain. `transpile.cpp` is the union, with the
+target-specific rules separated and commented. This is the de-facto S2L, and
+consolidating it is the prerequisite for §9.5 — writing the subset down.
+
+**The GL backend had to be inverted to fit the boundary.** The original created
+its own hidden SDL window and called `SDL_GL_GetProcAddress`. The core may not
+do that. So the host now owns the context and passes its loader in through
+`eshi_gl_set_proc_loader()`, and the core declares its own GL typedefs rather
+than including a GL header. That is strictly better than the original: it is
+what will let the Flutter embedder drive this backend with no SDL window in
+existence.
+
+**Cross-tier conformance is real and measurable.** `examples/ripple.cpp` is
+compiled in for Ink *and* handed to the GPU tiers as a source path — one file,
+both roles. Measured on an M4 Pro at 480x270:
+
+| Comparison | PSNR (through lossy H.264) |
+|---|---|
+| Brush (Metal) vs Ink | 53.4 dB |
+| Paper (OpenGL) vs Ink | 53.3 dB |
+
+Bit-exact CPU/GPU agreement is not achievable and was never the goal; the
+oracle is a tolerance diff, and these are far above the ~40 dB that reads as
+visually identical. This is the Ink-as-reference-oracle property from §2,
+working.
+
+Known limit: **Pong runs on Ink only.** Its shader takes a typed `Uniforms&`
+struct, and a textual transpiler cannot lower that. The GPU tiers do support
+uniform blocks — bound as a flat `eshi_uniforms` float array — so a GPU sidecar
+written against that array would lift the restriction, exactly as the existing
+`examples/gpu/` pattern does. Ergonomics for this is what Phase 4 is for.
+
+### Phase 1b — Filament as the 3D scene backend
 - `scripts/vendor_filament.sh` fetching prebuilts (§6.8).
-- `src/render/filament/` implementing the same interface as Ink.
-- Kantei grade selection at init (§2).
-- Gallery shaders as fullscreen unlit `.mat` — hand-written at this stage, to
-  learn the constraints before automating them.
-- ✅ Same Pong binary, `--grade brush`, unchanged game code.
+- `src/render/filament/` implementing the same vtable as the tiers above.
+- Filament now earns its place on what it uniquely adds — PBR, meshes, glTF,
+  shadows — rather than on fullscreen materials the salvaged backends already
+  cover. That is a much better trade than "drop-in replacement."
 
 ### Phase 2 — SDL3 + host hardening (§6.10)
 

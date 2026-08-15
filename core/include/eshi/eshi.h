@@ -269,14 +269,58 @@ typedef void (*EshiShaderFn)(float* out_rgba,
                              const void* uniforms);
 
 /**
+ * A material, described once for every tier.
+ *
+ * Ink executes `cpu_shader` directly — it is compiled into the binary. The GPU
+ * tiers cannot call a host function pointer, so they take `source_path` and
+ * transpile-and-compile it at runtime. Supplying both is what lets one material
+ * run on every grade; supplying one restricts the material to those tiers.
+ *
+ * A consequence worth knowing: because the GPU tiers read source at runtime,
+ * they get shader hot-reload for free, and Ink cannot have it. That asymmetry
+ * is inherent, not an oversight.
+ */
+typedef struct EshiMaterial {
+    EshiShaderFn cpu_shader;   /**< Ink. NULL restricts the material to GPU tiers. */
+    const char*  source_path;  /**< Paper/Brush/Gold. NULL restricts it to Ink. */
+    void*        uniform_data; /**< Caller-owned block, or NULL. */
+    size_t       uniform_size; /**< Bytes of `uniform_data`. */
+} EshiMaterial;
+
+/**
  * Binds the fullscreen material.
  *
  * `uniform_data` stays owned by the caller and must outlive the world. It is
  * read once per frame at render time, so a system at ESHI_ORDER_PRESENT can
- * repack it from component arrays each tick.
+ * repack it from component arrays each tick. On the GPU tiers the block is
+ * uploaded as a flat float array named `eshi_uniforms`.
  */
-EshiResult eshi_material_set(EshiWorld* w, EshiShaderFn shader,
-                             void* uniform_data, size_t uniform_size);
+EshiResult eshi_material_set(EshiWorld* w, const EshiMaterial* material);
+
+/**
+ * Reports whether a grade is compiled into this binary and usable right now.
+ *
+ * Hosts probe with this and pick; eshi_world_create() never silently downgrades
+ * a caller who asked for hardware they expected to have.
+ *
+ * Paper (OpenGL) additionally requires eshi_gl_set_proc_loader() to have been
+ * called and a context to be current, so this returns 0 for Paper until then.
+ */
+int eshi_grade_available(EshiGrade grade);
+
+/** Highest grade available in this binary, or ESHI_GRADE_INK. */
+EshiGrade eshi_grade_best(void);
+
+/**
+ * Supplies OpenGL entry points for the Paper backend.
+ *
+ * The core links no windowing library, so it cannot resolve GL symbols itself.
+ * The host — which already owns the context — passes its loader (SDL_GL_GetProcAddress
+ * or equivalent) and guarantees a current context on every eshi_render() call.
+ * This is the boundary rule from ARCHITECTURE.md §5 applied to OpenGL.
+ */
+typedef void* (*EshiGlProcLoader)(const char* name);
+void eshi_gl_set_proc_loader(EshiGlProcLoader loader);
 
 /* ===========================================================================
  * Frame

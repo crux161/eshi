@@ -40,13 +40,69 @@ EshiWorld* make_world() {
 
 void test_grade_gate() {
     std::printf("grade gate\n");
+
+    /* Ink has no hardware requirement, so it is always available. */
+    check(eshi_grade_available(ESHI_GRADE_INK) == 1, "Ink is always available");
+
+    /* This target links no GPU backend, so the upper grades must say so. */
+    check(eshi_grade_available(ESHI_GRADE_PAPER) == 0, "Paper unavailable without a GL loader");
+    check(eshi_grade_available(ESHI_GRADE_BRUSH) == 0, "Brush unavailable in a core-only build");
+    check(eshi_grade_available(ESHI_GRADE_GOLD) == 0, "Gold has no backend yet");
+    check(eshi_grade_best() == ESHI_GRADE_INK, "best available grade falls to Ink");
+
     EshiConfig cfg = eshi_config_default();
     cfg.grade = ESHI_GRADE_BRUSH;
-    check(eshi_world_create(&cfg) == NULL, "non-Ink grade is rejected until Filament lands");
+    check(eshi_world_create(&cfg) == NULL, "unavailable grade is refused, not downgraded");
 
     EshiWorld* w = make_world();
     check(w != NULL, "Ink grade is accepted");
     check(eshi_world_grade(w) == ESHI_GRADE_INK, "grade round-trips");
+    eshi_world_destroy(w);
+}
+
+/* A shader that paints a fixed colour, so render output is predictable. */
+void flat_shader(float* out_rgba, float, float, float, float, float, const void* uniforms) {
+    const float value = uniforms ? *static_cast<const float*>(uniforms) : 0.0f;
+    out_rgba[0] = value;
+    out_rgba[1] = 0.0f;
+    out_rgba[2] = 0.0f;
+    out_rgba[3] = 1.0f;
+}
+
+void test_material_and_render() {
+    std::printf("material and render\n");
+    EshiWorld* w = make_world();
+
+    uint8_t pixels[64 * 64 * 4];
+    check(eshi_render(w, pixels, 64 * 4, 0.0f) == ESHI_ERR_INVALID,
+          "render without a material is refused");
+
+    EshiMaterial empty;
+    empty.cpu_shader = NULL;
+    empty.source_path = NULL;
+    empty.uniform_data = NULL;
+    empty.uniform_size = 0;
+    check(eshi_material_set(w, &empty) == ESHI_ERR_INVALID,
+          "a material with neither entry point is refused");
+
+    float red = 1.0f;
+    EshiMaterial material;
+    material.cpu_shader = flat_shader;
+    material.source_path = NULL;
+    material.uniform_data = &red;
+    material.uniform_size = sizeof(red);
+    check(eshi_material_set(w, &material) == ESHI_OK, "Ink accepts a cpu_shader material");
+
+    check(eshi_render(w, pixels, 64 * 4, 0.0f) == ESHI_OK, "render succeeds");
+    check(pixels[0] == 255, "shader output reaches the framebuffer");
+    check(pixels[1] == 0, "untouched channel stays zero");
+    check(pixels[3] == 255, "alpha is written");
+
+    /* The uniform block is read every frame, not captured at bind time. */
+    red = 0.0f;
+    eshi_render(w, pixels, 64 * 4, 0.0f);
+    check(pixels[0] == 0, "uniform block is re-read each frame");
+
     eshi_world_destroy(w);
 }
 
@@ -291,6 +347,7 @@ int main() {
     std::printf("larimar core tests\n\n");
 
     test_grade_gate();
+    test_material_and_render();
     test_entity_generations();
     test_sparse_set_removal();
     test_motion_and_bounds();

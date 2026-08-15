@@ -47,6 +47,11 @@ pub fn build(b: *std.Build) void {
         "lto",
         "Enable LTO (default: false on macOS, true elsewhere)",
     ) orelse !is_macos;
+    const use_gl = b.option(
+        bool,
+        "gl",
+        "Build the Larimar OpenGL backend, Kantei grade Paper (default: true)",
+    ) orelse true;
 
     if (use_metal and !is_macos) {
         std.debug.panic("-Dmetal=true is only supported for macOS targets", .{});
@@ -83,12 +88,16 @@ pub fn build(b: *std.Build) void {
     // the shadertoy gallery above so neither path can break the other.
     const larimar_install = addLarimarExecutable(b, .{
         .name = "pong",
-        .game_sources = &.{"examples/pong/pong.cpp"},
+        // ripple is linked in so the Ink tier has a compiled-in entry point for
+        // the same source the GPU tiers transpile at runtime.
+        .game_sources = &.{ "examples/pong/pong.cpp", "examples/ripple.cpp" },
         .target = target,
         .optimize = optimize,
         .sumi_include = sumi_include,
         .libomp_prefix = libomp_prefix,
         .use_openmp = use_openmp,
+        .use_metal = use_metal,
+        .use_gl = use_gl,
         .use_lto = use_lto,
     });
     const larimar_step = b.step("larimar", "Build the Larimar core and the SDL host (pong)");
@@ -105,7 +114,13 @@ pub fn build(b: *std.Build) void {
     });
     test_module.addIncludePath(b.path("core/include"));
     test_module.addCSourceFiles(.{
-        .files = &.{ "core/src/world.cpp", "core/src/render_ink.cpp", "core/tests/test_core.cpp" },
+        .files = &.{
+            "core/src/world.cpp",
+            "core/src/render/registry.cpp",
+            "core/src/render/transpile.cpp",
+            "core/src/render/ink.cpp",
+            "core/tests/test_core.cpp",
+        },
         .flags = &.{ "-std=c++11", "-Wall", "-Wextra" },
         .language = .cpp,
     });
@@ -262,6 +277,8 @@ const LarimarOptions = struct {
     sumi_include: []const u8,
     libomp_prefix: []const u8,
     use_openmp: bool,
+    use_metal: bool,
+    use_gl: bool,
     use_lto: bool,
 };
 
@@ -290,11 +307,43 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
     else
         &.{ "-std=c++11", "-Wall", "-Wextra" };
 
+    // Kantei Grade 2 (Paper). The core links no windowing library, so the host
+    // supplies GL entry points through eshi_gl_set_proc_loader().
+    if (options.use_gl) module.addCMacro("ESHI_HAVE_GL", "1");
+
     module.addCSourceFiles(.{
-        .files = &.{ "core/src/world.cpp", "core/src/render_ink.cpp" },
+        .files = if (options.use_gl)
+            &.{
+                "core/src/world.cpp",
+                "core/src/render/registry.cpp",
+                "core/src/render/transpile.cpp",
+                "core/src/render/ink.cpp",
+                "core/src/render/gl.cpp",
+            }
+        else
+            &.{
+                "core/src/world.cpp",
+                "core/src/render/registry.cpp",
+                "core/src/render/transpile.cpp",
+                "core/src/render/ink.cpp",
+            },
         .flags = cpp_flags,
         .language = .cpp,
     });
+
+    // Kantei Grade 3 (Brush). Metal renders offscreen and opens no window, so
+    // it stays inside the core's boundary rule.
+    if (options.use_metal) {
+        module.addCMacro("ESHI_HAVE_METAL", "1");
+        module.addCSourceFile(.{
+            .file = b.path("core/src/render/metal.mm"),
+            .flags = &.{ "-std=c++11", "-Wall", "-Wextra", "-Wno-nullability-completeness", "-fobjc-arc" },
+            .language = .objective_cpp,
+        });
+        module.linkFramework("Metal", .{});
+        module.linkFramework("Foundation", .{});
+    }
+
     module.addCSourceFiles(.{
         .files = options.game_sources,
         .flags = cpp_flags,

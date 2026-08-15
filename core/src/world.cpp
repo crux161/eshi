@@ -147,9 +147,10 @@ struct EshiWorld {
     uint8_t keys[ESHI_KEY_COUNT];
     uint8_t keys_prev[ESHI_KEY_COUNT];
 
-    EshiShaderFn shader;
-    void*        uniforms;
-    size_t       uniform_size;
+    EshiMaterial material;
+
+    const EshiBackendVTable* backend_vtable;
+    EshiBackend*             backend;
 
     float    accumulator;
     uint64_t frame;
@@ -381,14 +382,18 @@ extern "C" EshiWorld* eshi_world_create(const EshiConfig* in_cfg) {
     if (cfg.max_entities > ESHI_MAX_ENTITIES) return NULL;
 
     /*
-     * Phase 0 ships Ink only. Paper/Brush/Gold are reserved for the Filament
-     * backend; failing loudly here beats silently downgrading a caller that
-     * asked for hardware it expected to have.
+     * A grade must be genuinely available. Failing here beats silently
+     * downgrading a caller who asked for hardware they expected to have — a
+     * host that wants a fallback probes with eshi_grade_available() first.
      */
-    if (cfg.grade != ESHI_GRADE_INK) return NULL;
+    const EshiBackendVTable* vtable = eshi__backend_for_grade(cfg.grade);
+    if (!vtable || !vtable->available()) return NULL;
 
     EshiWorld* w = new (std::nothrow) EshiWorld();
     if (!w) return NULL;
+
+    w->backend_vtable = vtable;
+    w->backend = NULL;
 
     w->cfg = cfg;
     w->generation.assign(cfg.max_entities + 1, 0);
@@ -404,9 +409,7 @@ extern "C" EshiWorld* eshi_world_create(const EshiConfig* in_cfg) {
     std::memset(w->keys, 0, sizeof(w->keys));
     std::memset(w->keys_prev, 0, sizeof(w->keys_prev));
 
-    w->shader = NULL;
-    w->uniforms = NULL;
-    w->uniform_size = 0;
+    std::memset(&w->material, 0, sizeof(w->material));
     w->accumulator = 0.0f;
     w->frame = 0;
     w->sim_time = 0.0;
@@ -419,7 +422,11 @@ extern "C" EshiWorld* eshi_world_create(const EshiConfig* in_cfg) {
     return w;
 }
 
-extern "C" void eshi_world_destroy(EshiWorld* w) { delete w; }
+extern "C" void eshi_world_destroy(EshiWorld* w) {
+    if (!w) return;
+    if (w->backend && w->backend_vtable) w->backend_vtable->destroy(w->backend);
+    delete w;
+}
 
 extern "C" EshiGrade eshi_world_grade(const EshiWorld* w) {
     return w ? w->cfg.grade : ESHI_GRADE_INK;
@@ -660,13 +667,38 @@ extern "C" int eshi_input_released(const EshiWorld* w, EshiKey key) {
 /* ===========================================================================
  * Material
  * ==========================================================================*/
-extern "C" EshiResult eshi_material_set(EshiWorld* w, EshiShaderFn shader,
-                                        void* uniform_data, size_t uniform_size) {
-    if (!w || !shader) return ESHI_ERR_INVALID;
-    w->shader = shader;
-    w->uniforms = uniform_data;
-    w->uniform_size = uniform_size;
+extern "C" EshiResult eshi_material_set(EshiWorld* w, const EshiMaterial* material) {
+    if (!w || !material) return ESHI_ERR_INVALID;
+    if (!material->cpu_shader && !material->source_path) return ESHI_ERR_INVALID;
+
+    /*
+     * The backend is built here rather than at world creation because the GPU
+     * tiers compile the shader up front and only learn the source path now.
+     * Rebinding therefore recompiles — which is exactly what shader hot-reload
+     * needs, and is available on the GPU tiers only (Ink's shader is compiled
+     * into the binary).
+     */
+    if (w->backend) {
+        w->backend_vtable->destroy(w->backend);
+        w->backend = NULL;
+    }
+
+    EshiBackend* backend =
+        w->backend_vtable->create(w->cfg.width, w->cfg.height, material->source_path);
+    if (!backend) return ESHI_ERR_UNSUPPORTED;
+
+    w->backend = backend;
+    w->material = *material;
     return ESHI_OK;
+}
+
+extern "C" EshiResult eshi_render(EshiWorld* w, uint8_t* pixels, int32_t stride, float time) {
+    if (!w || !pixels || stride <= 0) return ESHI_ERR_INVALID;
+    if (!w->backend) return ESHI_ERR_INVALID;
+    return w->backend_vtable->render(w->backend, pixels, stride, time,
+                                     w->material.cpu_shader,
+                                     w->material.uniform_data,
+                                     w->material.uniform_size);
 }
 
 /* ===========================================================================
@@ -705,13 +737,17 @@ extern "C" double   eshi_sim_time(const EshiWorld* w)    { return w ? w->sim_tim
 extern "C" void eshi__frame_params(EshiWorld* w,
                                    EshiShaderFn* out_shader,
                                    const void**  out_uniforms,
+                                   size_t*       out_uniform_size,
+                                   const char**  out_source_path,
                                    int32_t*      out_width,
                                    int32_t*      out_height) {
     if (!w) return;
-    if (out_shader)   *out_shader = w->shader;
-    if (out_uniforms) *out_uniforms = w->uniforms;
-    if (out_width)    *out_width = w->cfg.width;
-    if (out_height)   *out_height = w->cfg.height;
+    if (out_shader)       *out_shader = w->material.cpu_shader;
+    if (out_uniforms)     *out_uniforms = w->material.uniform_data;
+    if (out_uniform_size) *out_uniform_size = w->material.uniform_size;
+    if (out_source_path)  *out_source_path = w->material.source_path;
+    if (out_width)        *out_width = w->cfg.width;
+    if (out_height)       *out_height = w->cfg.height;
 }
 
 /* ===========================================================================
