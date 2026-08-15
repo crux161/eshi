@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <cstring>
+#include <regex>
 #include <stdexcept>
 #include <sys/stat.h>
 
@@ -164,6 +165,15 @@ class GlRenderer {
         return str;
     }
 
+
+    // Counts a character in a line; used to balance braces when skipping a
+    // host-only function body.
+    static int countChar(const std::string& s, char c) {
+        int n = 0;
+        for (size_t i = 0; i < s.size(); ++i) if (s[i] == c) ++n;
+        return n;
+    }
+
     std::string readFile(std::string path) {
         std::string cleanPath = resolvePath(path);
         if (cleanPath.empty()) {
@@ -175,11 +185,25 @@ class GlRenderer {
 
         std::ifstream f(cleanPath);
         std::string content, line;
+        int skipDepth = 0;
         while(std::getline(f, line)) {
+            // A host-only declaration that opens a block must take its body
+            // with it. Dropping only the signature left the body orphaned at
+            // program scope, which is what broke mario.cpp and tunnelwisp.cpp:
+            // both define `extern "C" vec2 mainSound(...)` for the audio
+            // thread, which is host code with no place in a shader.
+            if (skipDepth > 0) {
+                skipDepth += countChar(line, '{') - countChar(line, '}');
+                continue;
+            }
             if(line.find("#include") != std::string::npos) continue;
             if(line.find("#pragma") != std::string::npos) continue;
             if(line.find("using namespace") != std::string::npos) continue;
-            if(line.find("extern") != std::string::npos) continue; 
+            if(line.find("extern") != std::string::npos) {
+                const int opened = countChar(line, '{') - countChar(line, '}');
+                if (opened > 0) skipDepth = opened;
+                continue;
+            }
             
             line = replaceAll(line, "inline ", "");
             // Namespace-qualified calls are valid C++ and a syntax error in
@@ -188,18 +212,81 @@ class GlRenderer {
             // glsl::length(...) failed to compile here while working on Metal.
             line = replaceAll(line, "glsl::", "");
             line = replaceAll(line, "sumi::", "");
-            line = replaceAll(line, "vec4 &fragColor", "out vec4 fragColor");
-            line = replaceAll(line, "vec4 &", "out vec4 ");
+            // Any surviving `::` is the global-scope qualifier —
+            // tunnelwisp.cpp calls ::tanhf to reach libc past libsumi's
+            // overload. GLSL has no scope resolution and no single `:` is
+            // touched, so stripping the pair is safe in this subset.
+            line = replaceAll(line, "::", "");
+
+            // C++ reference parameters become GLSL parameter qualifiers.
+            //
+            // fragColor maps to `out` — every shader fills it and none reads
+            // it, and main() below passes a variable it has just declared.
+            //
+            // Everything else maps to `inout`, preserving C++ reference
+            // semantics. `out` would be wrong: mario.cpp's sprite helpers take
+            // `vec3& color` and composite onto what is already there, so `out`
+            // would make each sprite erase the background.
+            //
+            // Only the `vec4 &` spellings were handled before, so seascape,
+            // lunar, mario, and rainforest — which pass vec3 and float by
+            // reference — emitted a bare `&` and failed to compile. Metal has
+            // covered these since it was written; this copy had drifted.
+            static const std::string refTypes =
+                "float|int|bool|vec2|vec3|vec4|ivec2|ivec3|ivec4|"
+                "bvec2|bvec3|bvec4|mat2|mat3|mat4";
+            static const std::regex fragColorRef("\\b(" + refTypes + ")\\s*&\\s*fragColor\\b");
+            static const std::regex generalRef("\\b(" + refTypes + ")\\s*&\\s*");
+
+            // A const reference is a read-only input, so it maps to `in`,
+            // and must be matched before the general rule: leaving the const
+            // and qualifying it `inout` yields `const inout vec4`, which GLSL
+            // rejects. rainforest.cpp's yzw() and yz() take const refs.
+            static const std::regex constRef("\\bconst\\s+(" + refTypes + ")\\s*&\\s*");
+
+            line = std::regex_replace(line, fragColorRef, "out $1 fragColor");
+            line = std::regex_replace(line, constRef, "in $1 ");
+            line = std::regex_replace(line, generalRef, "inout $1 ");
+
+            // `(void)x;` suppresses an unused-parameter warning on the CPU
+            // build and is a syntax error in GLSL. MSL is C++-based and
+            // accepts it, so this is GLSL-only. Used by mario, rainforest,
+            // and tunnelwisp.
+            static const std::regex voidCast("\\(\\s*void\\s*\\)\\s*[A-Za-z_][A-Za-z0-9_]*\\s*;");
+            line = std::regex_replace(line, voidCast, "");
+
+            // C++ direct-initialization — `vec2 c(0.0f, 1.0f);` — is a
+            // declaration in C++ and a syntax error in GLSL, which wants an
+            // explicit constructor call. Anchored to an indented statement
+            // ending in `);` so it cannot match a function definition, whose
+            // line ends in `{`. lunar.cpp uses it twice.
+            static const std::regex directInit(
+                "^([ \\t]+)(vec2|vec3|vec4|mat2|mat3|mat4|ivec2|ivec3|ivec4|bvec2|bvec3|bvec4)"
+                "[ \\t]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*\\((.*)\\)[ \\t]*;[ \\t]*$");
+            line = std::regex_replace(line, directInit, "$1$2 $3 = $2($4);");
+
+            // C-style casts — `(float)i` — are a GLSL syntax error; GLSL
+            // spells it as a constructor call, `float(i)`. Limited to a cast
+            // of a bare identifier or numeric literal, which covers every use
+            // in the corpus.
+            // Two forms. The parenthesised one is easier: in
+            // `(float)((i >> 1) & 1)` the existing parentheses already serve
+            // as the constructor's argument list, so dropping the cast's own
+            // parentheses is the whole transformation.
+            static const std::regex cCastParen("\\(\\s*(float|int|uint|bool)\\s*\\)\\s*\\(");
+            line = std::regex_replace(line, cCastParen, "$1(");
+
+            static const std::regex cCast(
+                "\\(\\s*(float|int|uint|bool)\\s*\\)\\s*([A-Za-z_][A-Za-z0-9_]*|[0-9]+\\.?[0-9]*f?)");
+            line = std::regex_replace(line, cCast, "$1($2)");
             line = replaceAll(line, "if (iChannel0.data == nullptr)", "if (false)");
 
-            line = replaceAll(line, ".xyyx()", ".xyyx");
-            line = replaceAll(line, ".xyz()", ".xyz");
-            line = replaceAll(line, ".xy()", ".xy");
-            line = replaceAll(line, ".yx()", ".yx");
-            line = replaceAll(line, ".x()", ".x");
-            line = replaceAll(line, ".y()", ".y");
-            line = replaceAll(line, ".z()", ".z");
-            line = replaceAll(line, ".w()", ".w");
+            // libsumi exposes swizzles as calls; GLSL wants members. This was
+            // a hardcoded list of eight spellings and silently missed the
+            // rest — lunar.cpp's .xz() among them. Metal has used the general
+            // form since it was written; this is the same drift as the missing
+            // glsl:: strip.
+            line = std::regex_replace(line, std::regex("\\.([xyzw]{1,4})\\(\\)"), ".$1");
 
             content += line + "\n";
         }
@@ -298,11 +385,16 @@ public:
                             "#define atan2f atan\n"
                             "#define powf pow\n"
                             "#define expf exp\n"
+                            "#define exp2f exp2\n"
                             "#define logf log\n"
+                            "#define log2f log2\n"
                             "#define sqrtf sqrt\n"
                             "#define fabsf abs\n"
                             "#define floorf floor\n"
                             "#define ceilf ceil\n"
+                            "#define roundf round\n"
+                            "#define truncf trunc\n"
+                            "#define tanhf tanh\n"
                             "#define modf mod\n"
                             "#define fminf min\n"
                             "#define fmaxf max\n"
