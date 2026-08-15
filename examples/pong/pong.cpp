@@ -198,14 +198,14 @@ void build(EshiWorld* w, Game* g) {
     eshi_system_add(w, "pong.present",  ESHI_ORDER_PRESENT,     system_present,       g);
 
     /*
-     * Ink only, for now: the GPU tiers need a transpilable source file, and
-     * this shader takes a typed struct that the textual transpiler cannot
-     * lower. A GPU sidecar written against the flat `eshi_uniforms` array
-     * would lift that — the same pattern examples/gpu/ already uses.
+     * One material, both roles. Ink executes the typed mainImage below; the GPU
+     * tiers transpile the sidecar, which is the same material re-expressed
+     * against the flat `eshi_uniforms` array because a textual transpiler
+     * cannot lower a struct parameter into a shader binding.
      */
     EshiMaterial material;
     material.cpu_shader = eshi::shader<Uniforms, mainImage>();
-    material.source_path = NULL;
+    material.source_path = "examples/pong/pong.gpu.cpp";
     material.uniform_data = &g->uniforms;
     material.uniform_size = sizeof(g->uniforms);
     eshi_material_set(w, &material);

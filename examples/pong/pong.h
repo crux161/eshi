@@ -31,6 +31,23 @@ struct Uniforms {
     float      score_r;
 };
 
+/** Number of floats in the block, as the GPU tiers see it. */
+const size_t kUniformFloats = 9;
+
+/*
+ * The GPU tiers receive this block as a flat float array and index it by
+ * position (see the layout contract in pong.gpu.cpp). Padding or a reordered
+ * member would silently garble the GPU render while leaving Ink correct, so the
+ * layout is asserted rather than trusted.
+ */
+#if __cplusplus >= 201103L
+static_assert(sizeof(Uniforms) == kUniformFloats * sizeof(float),
+              "pong::Uniforms must stay tightly packed: pong.gpu.cpp indexes it as "
+              "a flat float array");
+static_assert(sizeof(sumi::vec2) == 2 * sizeof(float),
+              "sumi::vec2 must be two tightly packed floats");
+#endif
+
 /** Handles into the world, plus the game's own state. */
 struct Game {
     EshiEntity paddle_l;

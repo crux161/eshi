@@ -109,6 +109,8 @@ void print_usage(const char* argv0) {
         "  --out FILE   Output path. Default pong.mp4.\n"
         "  --hash       Render without encoding and print a framebuffer digest.\n"
         "  --grade G    Kantei tier: ink, paper, brush, gold. Default ink.\n"
+        "  --dump DIR   Write every frame to DIR as raw PPM. The cross-tier\n"
+        "               conformance oracle: no codec in the measurement path.\n"
         "  --gallery    Run the ripple gallery shader instead of pong. Required\n"
         "               for the GPU tiers, which cannot execute pong's typed\n"
         "               uniform struct.\n",
@@ -125,6 +127,7 @@ int main(int argc, char** argv) {
     bool        live = false;
     bool        hash_only = false;
     bool        gallery = false;
+    std::string dump_dir;
     EshiGrade   grade = ESHI_GRADE_INK;
     int         frames = 600;
     uint64_t    seed = 0x5EED5EEDull;
@@ -149,6 +152,8 @@ int main(int argc, char** argv) {
             out_path = argv[++i];
         } else if (arg == "--hash") {
             hash_only = true;
+        } else if (arg == "--dump" && i + 1 < argc) {
+            dump_dir = argv[++i];
         } else if (arg == "--gallery") {
             gallery = true;
         } else if (arg == "--grade" && i + 1 < argc) {
@@ -241,13 +246,6 @@ int main(int argc, char** argv) {
             return 1;
         }
     } else {
-        if (grade != ESHI_GRADE_INK) {
-            std::fprintf(stderr,
-                         "pong runs on Ink only: its shader takes a typed uniform "
-                         "struct the transpiler cannot lower. Use --gallery.\n");
-            eshi_world_destroy(world);
-            return 1;
-        }
         pong::build(world, &game);
     }
 
@@ -303,8 +301,12 @@ int main(int argc, char** argv) {
         SDL_DestroyWindow(window);
         SDL_Quit();
 
-    } else if (hash_only) {
-        /* Same loop as the encode path, with the encoder removed. */
+    } else if (hash_only || !dump_dir.empty()) {
+        /*
+         * Same loop as the encode path with the encoder removed, so the frames
+         * are the renderer's exact output. That matters for --dump: comparing
+         * tiers through a lossy codec measures the codec, not the backend.
+         */
         std::vector<uint8_t> framebuffer((size_t)width * (size_t)height * 4);
         const int stride = width * 4;
         const float fixed_dt = 1.0f / 60.0f;
@@ -315,6 +317,25 @@ int main(int argc, char** argv) {
             eshi_render(world, framebuffer.data(), stride, (float)eshi_sim_time(world));
             digest ^= hash_framebuffer(framebuffer.data(), width, height, stride);
             digest *= 1099511628211ull;
+
+            if (!dump_dir.empty()) {
+                char path[1024];
+                std::snprintf(path, sizeof(path), "%s/%06d.ppm", dump_dir.c_str(), i);
+                FILE* f = std::fopen(path, "wb");
+                if (!f) {
+                    std::fprintf(stderr, "cannot write %s\n", path);
+                    rc = 1;
+                    break;
+                }
+                std::fprintf(f, "P6\n%d %d\n255\n", width, height);
+                for (int y = 0; y < height; ++y) {
+                    const uint8_t* row = framebuffer.data() + (size_t)y * (size_t)stride;
+                    for (int x = 0; x < width; ++x) {
+                        std::fwrite(row + x * 4, 1, 3, f); /* drop alpha */
+                    }
+                }
+                std::fclose(f);
+            }
         }
         std::printf("frames=%d digest=%016llx score=%d-%d\n",
                     frames, (unsigned long long)digest, game.score_l, game.score_r);

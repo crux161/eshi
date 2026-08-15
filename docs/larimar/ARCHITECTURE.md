@@ -445,25 +445,42 @@ than including a GL header. That is strictly better than the original: it is
 what will let the Flutter embedder drive this backend with no SDL window in
 existence.
 
-**Cross-tier conformance is real and measurable.** `examples/ripple.cpp` is
-compiled in for Ink *and* handed to the GPU tiers as a source path — one file,
-both roles. Measured on an M4 Pro at 480x270:
+**Cross-tier conformance is real, measurable, and it found a bug.** Materials
+carry a compiled-in entry point for Ink *and* a source path the GPU tiers
+transpile — one material, every tier. Comparing raw framebuffers (`--dump`,
+no codec in the path) on an M4 Pro at 320x180:
 
-| Comparison | PSNR (through lossy H.264) |
-|---|---|
-| Brush (Metal) vs Ink | 53.4 dB |
-| Paper (OpenGL) vs Ink | 53.3 dB |
+| Scene | Comparison | mean \|diff\| | max \|diff\| |
+|---|---|---|---|
+| pong, 120 frames | Brush (Metal) vs Ink | 0.0000/255 | **1** |
+| pong, 120 frames | Paper (OpenGL) vs Ink | 0.0000/255 | **1** |
+| ripple, 60 frames | Brush vs Ink | 0.0000/255 | **1** |
+| ripple, 60 frames | Paper vs Ink | 0.0000/255 | **1** |
 
-Bit-exact CPU/GPU agreement is not achievable and was never the goal; the
-oracle is a tolerance diff, and these are far above the ~40 dB that reads as
-visually identical. This is the Ink-as-reference-oracle property from §2,
-working.
+One least-significant bit is as close as CPU and GPU float evaluation can get;
+bit-exact agreement is not achievable and was never the goal. Note that the
+`--hash` digests still differ across tiers, and should: the digest is a strict
+equality check that answers *"is this tier deterministic?"*, not *"do two tiers
+agree?"* Those need different tools, and conflating them is easy.
 
-Known limit: **Pong runs on Ink only.** Its shader takes a typed `Uniforms&`
-struct, and a textual transpiler cannot lower that. The GPU tiers do support
-uniform blocks — bound as a flat `eshi_uniforms` float array — so a GPU sidecar
-written against that array would lift the restriction, exactly as the existing
-`examples/gpu/` pattern does. Ergonomics for this is what Phase 4 is for.
+**The oracle immediately earned its keep.** The first cross-tier run showed
+Paper diverging from Ink and growing worse over time. The cause: `glReadPixels`
+returns rows bottom-up, and the readback was copying them straight through, so
+every GL render was vertically mirrored against the CPU one. **The original
+`renderer_gl.h:323` has the same bug.** It survived unnoticed because most of
+the gallery — and Pong — is close enough to vertically symmetric to hide it.
+A pixel diff against a CPU reference found in one run what eyeballing had
+missed for the life of the renderer. That is the entire argument for keeping
+Ink, demonstrated.
+
+**Pong runs on every tier.** `examples/pong/pong.gpu.cpp` is the sidecar: the
+same material re-expressed against the flat `eshi_uniforms` float array, since
+a textual transpiler cannot lower pong.cpp's typed `const Uniforms&` parameter.
+`pong.h` static_asserts the struct stays tightly packed, so a layout drift
+becomes a build failure rather than a garbled GPU frame. One constraint worth
+recording: every read of `eshi_uniforms` must happen inside `mainImage`,
+because GLSL exposes it as a global while MSL threads it through the entry
+point's signature — a helper function cannot see it.
 
 ### Phase 1b — Filament as the 3D scene backend
 - `scripts/vendor_filament.sh` fetching prebuilts (§6.8).
@@ -510,11 +527,11 @@ Pong, with **zero engine code in the game**:
       original sin here — `renderFrame(..., GameData*)` on every backend).
 - [x] Walls are static colliders, not an `if` in the update loop.
 - [x] All 20 gallery examples still build and render.
+- [x] The same game source runs on **three** backends — Ink, Paper, Brush —
+      selected at runtime by Kantei grade, agreeing to within 1 LSB.
 - [ ] The same game source runs under **both** hosts — `hosts/sdl` and
       `hosts/flutter` — unmodified. *(Phase 3)*
-- [ ] The same game source runs on **both** backends — Ink and Filament —
-      selected at runtime by Kantei grade. *(Phase 1; the grade gate already
-      exists and rejects non-Ink rather than silently downgrading.)*
+- [ ] …and on Filament. *(Phase 1b)*
 - [ ] Editing paddle speed in Dart and hot-reloading changes it live, and the
       scene does **not** duplicate (§6.6). *(Phase 3)*
 

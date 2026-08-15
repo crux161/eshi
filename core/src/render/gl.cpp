@@ -106,6 +106,8 @@ struct GlBackend {
     GLint       loc_resolution;
     GLint       loc_time;
     GLint       loc_uniforms;
+    /* Tightly packed readback staging, so the row flip needs no per-frame alloc. */
+    std::vector<uint8_t> scratch;
 };
 
 /* Set through the public eshi_gl_set_proc_loader(). */
@@ -201,9 +203,18 @@ EshiBackend* gl_create(int32_t width, int32_t height, const char* source_path) {
     }
 
     GlBackend* backend = new GlBackend();
-    std::memset(backend, 0, sizeof(*backend));
+    std::memset(&backend->gl, 0, sizeof(backend->gl));
     backend->width = width;
     backend->height = height;
+    backend->program = 0;
+    backend->fbo = 0;
+    backend->fbo_texture = 0;
+    backend->vbo = 0;
+    backend->vao = 0;
+    backend->loc_resolution = -1;
+    backend->loc_time = -1;
+    backend->loc_uniforms = -1;
+    backend->scratch.resize((size_t)width * (size_t)height * 4);
 
     if (!load_functions(&backend->gl, g_proc_loader)) {
         delete backend;
@@ -316,22 +327,23 @@ EshiResult gl_render(EshiBackend* handle,
     gl.DrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
     /*
-     * Read back tightly packed, then expand into the host's stride. glReadPixels
-     * returns rows bottom-up, which matches the bottom-left fragCoord origin the
-     * Ink backend uses, so no flip is needed.
+     * glReadPixels returns rows bottom-up: offset 0 is the row where
+     * gl_FragCoord.y is smallest. The engine's framebuffer is top-down — Ink
+     * writes row 0 from the largest fragCoord.y — so the readback must be
+     * flipped, not copied straight through.
+     *
+     * The original renderer_gl.h did copy it straight through (line 323), which
+     * left every GPU render vertically mirrored against the CPU one. It went
+     * unnoticed because most of the gallery is vertically symmetric enough to
+     * hide it; the Ink-vs-GPU pixel diff is what surfaced it.
      */
     gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
     const size_t packed_stride = (size_t)width * 4;
-    if ((size_t)stride == packed_stride) {
-        gl.ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    } else {
-        std::vector<uint8_t> packed(packed_stride * (size_t)height);
-        gl.ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, packed.data());
-        for (int32_t y = 0; y < height; ++y) {
-            std::memcpy(pixels + (size_t)y * (size_t)stride,
-                        packed.data() + (size_t)y * packed_stride,
-                        packed_stride);
-        }
+    gl.ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, backend->scratch.data());
+    for (int32_t y = 0; y < height; ++y) {
+        std::memcpy(pixels + (size_t)y * (size_t)stride,
+                    backend->scratch.data() + (size_t)(height - 1 - y) * packed_stride,
+                    packed_stride);
     }
 
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
