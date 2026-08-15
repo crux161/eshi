@@ -344,14 +344,40 @@ render backend swaps underneath a proven interface.
 Building the hardest dependency first and the acceptance test last is how you
 discover in month six that the API shape was wrong.
 
-### Phase 0 — Carve the boundary (no Filament)
-- `core/` + `include/eshi/eshi.h` as pure C99.
-- SoA ECS; entity IDs; component arrays; a system scheduler.
-- Command ring buffer (§6.7) — exercised from C++ first, Dart later.
-- `hosts/sdl` standalone host wrapping today's SDL2 path.
-- **Ink** backend = today's `renderer_cpu.h` behind the new interface.
-- Port Pong: game code becomes components + one system + a scene description.
-- ✅ **First Light, Ink tier.**
+### Phase 0 — Carve the boundary (no Filament) — **landed**
+
+Built on this branch. `zig build larimar && zig build test`.
+
+| Piece | Where | State |
+|---|---|---|
+| Pure C99 public API | `core/include/eshi/eshi.h` | Done — no platform, graphics, or C++ type crosses it |
+| SoA ECS, sparse sets, generational handles | `core/src/world.cpp` | Done — transform/velocity/collider/bounds |
+| System scheduler, deterministic ordering | `core/src/world.cpp` | Done — ascending order, registration tie-break |
+| Generic AABB collision + event queue | `core/src/world.cpp` | Done — layers/masks, restitution, static bodies |
+| Fixed timestep + seeded RNG | `core/src/world.cpp` | Done — clamped catch-up, splitmix64 |
+| **Ink** backend | `core/src/render_ink.cpp` | Done — OpenMP fullscreen material |
+| C++ shader authoring layer | `core/include/eshi/shader.hpp` | Done — adapts `mainImage` to the C ABI |
+| SDL host | `hosts/sdl/host_sdl.cpp` | Done — live, headless encode, `--hash` |
+| Pong as a game | `examples/pong/` | Done — see §8 |
+| Core tests | `core/tests/test_core.cpp` | Done — 38 checks passing |
+| Command ring buffer (§6.7) | — | **Deferred to Phase 3**, where Dart is the first real consumer |
+
+Two things worth recording from the build:
+
+**The engine is deterministic; the MP4 encode is not.** Framebuffer digests are
+identical across runs at equal seed and differ across seeds
+(`pong --hash`), but the encoded `.mp4` bytes differ run to run. The
+nondeterminism is in the shared FFmpeg/x264 path in `encoder.h`, not in
+Larimar. Reproducible video export needs that fixed separately — probably
+pinned encoder threading — and it is a prerequisite for using the gallery
+`.gif`s as a pixel-diff oracle in Phase 4.
+
+**The test target is the boundary check.** `zig build test` links `core/` alone —
+no SDL, no FFmpeg, not even libsumi. If that target ever needs one of them, the
+OS-oblivious rule in §5 has been broken, and the build will say so.
+
+Not yet done in Phase 0: the gallery still runs through the old `main.cpp` path
+rather than through the core. Both build; they do not yet share a renderer.
 
 ### Phase 1 — Filament as a backend
 - `scripts/vendor_filament.sh` fetching prebuilts (§6.8).
@@ -388,17 +414,27 @@ discover in month six that the API shape was wrong.
 
 Pong, with **zero engine code in the game**:
 
-- [ ] `examples/pong/` contains a scene description, component data, and one
-      system. No `main()`, no SDL call, no renderer reference, no `IGame`.
-- [ ] Collision comes from a generic `Collider` component and a generic collision
-      system. `ResolvePaddleBounce()` does not exist.
+- [x] `examples/pong/` contains a scene description, component data, and three
+      systems. No `main()`, no SDL call, no renderer reference, no `IGame`.
+- [x] Collision comes from a generic `Collider` component and a generic
+      collision system. `ResolvePaddleBounce()` does not exist — the engine
+      separates the bodies and reflects the velocity, and the game adds English
+      and speed-up by reading events.
+- [x] The game's uniform block lives in the game. `GameData` is out of the
+      shared math header, and no backend signature names a game (§6.2 was the
+      original sin here — `renderFrame(..., GameData*)` on every backend).
+- [x] Walls are static colliders, not an `if` in the update loop.
+- [x] All 20 gallery examples still build and render.
 - [ ] The same game source runs under **both** hosts — `hosts/sdl` and
-      `hosts/flutter` — unmodified.
+      `hosts/flutter` — unmodified. *(Phase 3)*
 - [ ] The same game source runs on **both** backends — Ink and Filament —
-      selected at runtime by Kantei grade.
+      selected at runtime by Kantei grade. *(Phase 1; the grade gate already
+      exists and rejects non-Ink rather than silently downgrading.)*
 - [ ] Editing paddle speed in Dart and hot-reloading changes it live, and the
-      scene does **not** duplicate (§6.6).
-- [ ] All 20 gallery examples still render, on every phase, throughout.
+      scene does **not** duplicate (§6.6). *(Phase 3)*
+
+The last checkbox in the "still build and render" line is the regression gate
+for the whole project. If a phase breaks the gallery, the phase is wrong.
 
 That last checkbox is the regression gate for the whole project. If a phase
 breaks the gallery, the phase is wrong.
@@ -407,18 +443,50 @@ breaks the gallery, the phase is wrong.
 
 ## 9. Open questions
 
-These need answers before Phase 1, and two of them are load-bearing:
+**Settled:** Ink stays. It is the differentiator, not a transitional oracle —
+it is the tier below Filament's floor, and §7 is ordered accordingly.
 
-1. **Does the Ink tier survive long-term, or is it a transitional oracle?** §2
-   argues it is the defensible differentiator. If it is instead scaffolding to be
-   dropped once Filament lands, §7's whole ordering changes and Kantei's Grade 1
-   becomes vestigial. This is the biggest strategic question on the branch.
-2. **Which `libsumi` is canonical**, and who owns the conformance suite that keeps
-   them honest (§4)?
-3. **Does `hanga` stay a preview tool, or become the Ink-tier runtime?** §4 assumes
-   tool. Promoting it adds a second shipped ABI.
-4. Is the Flutter host a *target* or *the* target? It determines whether the SDL
+**Settled:** the Rust monorepo is context, not a dependency. Nothing in
+`resources/gyosho` is linked, vendored, or ported wholesale. S2L's ideas move
+into the C++ side; its implementation does not.
+
+Still open, before Phase 1:
+
+1. **Which `libsumi` is canonical**, and who owns the conformance suite (§4)?
+   With Rust out of the runtime, the C++ one is canonical by default — but the
+   Rust README still claims to be replacing it, and that claim should be retired
+   explicitly rather than left to rot.
+2. Is the Flutter host a *target* or *the* target? It decides whether the SDL
    host is a first-class product or a test harness.
-5. Filament `FeatureLevel` ↔ Kantei `Grade` — verify the mapping in §2.
-6. `.mat` expressive limits vs. the S2L corpus — verify before designing
-   `FilamentGenerator` (§3).
+3. Filament `FeatureLevel` ↔ Kantei `Grade` — verify the mapping in §2.
+4. `.mat` expressive limits vs. the gallery corpus — verify before designing the
+   `.mat` emitter (§3).
+5. **Specify the C++ shader subset.** It already exists implicitly: it is
+   whatever survives the `replaceAll` passes in `renderer_gl.h` and
+   `renderer_metal.mm`, and 20 programs already conform to it. Writing it down
+   is the cheapest possible version of "define S2L", and it has to happen before
+   anything can be mechanically retargeted to `.mat`.
+6. **Audio has no design.** `mainSound` is weak-linked onto the SDL audio
+   thread, and Pong's hit feedback is currently a visual uniform. Gameplay
+   events reaching the audio thread need a lock-free queue, and nothing in the
+   proposal covers it.
+
+---
+
+## 10. What Phase 0 deliberately did not do
+
+Recorded so they read as decisions rather than oversights:
+
+- **No command ring buffer.** §6.7 stands, but the first real consumer is Dart
+  in Phase 3. Building the bulk-transfer path before anything crosses a language
+  boundary would be speculative; the C API is already shaped to accept it.
+- **The gallery was not moved onto the core.** The 20 shadertoy examples still
+  run through the original `main.cpp`. Both paths build and neither can break
+  the other. Merging them is Phase 1 work, once Filament defines what the
+  unified material path looks like.
+- **`resources/gyosho` and `resources/SumiC` were left untouched** — untracked
+  loose copies, no submodule wiring, no build dependency. They are reference
+  material for now.
+- **Collision broadphase is O(n²).** Correct, and not the bottleneck at these
+  entity counts. The event contract above it does not change when a broadphase
+  is added.

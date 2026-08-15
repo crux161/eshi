@@ -66,3 +66,7 @@ x/
 # --- OS Junk ---
 Thumbs.db
 .DS_Store
+
+# Larimar reference material — untracked loose copies, not dependencies
+resources/gyosho/
+resources/SumiC/

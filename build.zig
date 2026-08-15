@@ -79,6 +79,47 @@ pub fn build(b: *std.Build) void {
     const eshi_step = b.step("eshi", "Build and install only the main eshi executable");
     const examples_step = b.step("examples", "Build and install all example executables");
 
+    // Larimar: the Phase 0 engine core plus its hosts. Built independently of
+    // the shadertoy gallery above so neither path can break the other.
+    const larimar_install = addLarimarExecutable(b, .{
+        .name = "pong",
+        .game_sources = &.{"examples/pong/pong.cpp"},
+        .target = target,
+        .optimize = optimize,
+        .sumi_include = sumi_include,
+        .libomp_prefix = libomp_prefix,
+        .use_openmp = use_openmp,
+        .use_lto = use_lto,
+    });
+    const larimar_step = b.step("larimar", "Build the Larimar core and the SDL host (pong)");
+    larimar_step.dependOn(&larimar_install.step);
+    b.getInstallStep().dependOn(&larimar_install.step);
+
+    // Core tests link only the core: no SDL, no FFmpeg, no libsumi. If this
+    // target ever needs one of them, the OS-oblivious boundary has been broken.
+    const test_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    test_module.addIncludePath(b.path("core/include"));
+    test_module.addCSourceFiles(.{
+        .files = &.{ "core/src/world.cpp", "core/src/render_ink.cpp", "core/tests/test_core.cpp" },
+        .flags = &.{ "-std=c++11", "-Wall", "-Wextra" },
+        .language = .cpp,
+    });
+    const core_tests = b.addExecutable(.{
+        .name = "eshi-core-tests",
+        .root_module = test_module,
+        .use_llvm = true,
+    });
+    core_tests.lto = .none;
+
+    const run_tests = b.addRunArtifact(core_tests);
+    const test_step = b.step("test", "Run the Larimar core tests");
+    test_step.dependOn(&run_tests.step);
+
     const main_install = addEshiExecutable(b, .{
         .name = "eshi",
         .shader_source = "shader.cpp",
@@ -208,6 +249,90 @@ fn addEshiExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
         });
         exe.root_module.addObject(shader_object);
     }
+    exe.lto = if (options.use_lto) .full else .none;
+
+    return b.addInstallArtifact(exe, .{});
+}
+
+const LarimarOptions = struct {
+    name: []const u8,
+    game_sources: []const []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    sumi_include: []const u8,
+    libomp_prefix: []const u8,
+    use_openmp: bool,
+    use_lto: bool,
+};
+
+/// Builds a Larimar host: the OS-oblivious core, a game, and the SDL host.
+///
+/// The core compiles with no platform headers and no Metal/CUDA/GL sources —
+/// that separation is the architecture's central invariant, so it is enforced
+/// here by what is *absent* from the source list rather than by convention.
+fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.InstallArtifact {
+    const module = b.createModule(.{
+        .target = options.target,
+        .optimize = options.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+
+    module.addIncludePath(b.path("."));
+    module.addIncludePath(b.path("core/include"));
+    module.addIncludePath(pathFromOption(b, options.sumi_include));
+
+    const cpp_flags: []const []const u8 = if (options.use_openmp)
+        if (options.target.result.os.tag == .macos)
+            &.{ "-std=c++11", "-Wall", "-Wextra", "-Wno-nullability-completeness", "-Xpreprocessor", "-fopenmp" }
+        else
+            &.{ "-std=c++11", "-Wall", "-Wextra", "-fopenmp" }
+    else
+        &.{ "-std=c++11", "-Wall", "-Wextra" };
+
+    module.addCSourceFiles(.{
+        .files = &.{ "core/src/world.cpp", "core/src/render_ink.cpp" },
+        .flags = cpp_flags,
+        .language = .cpp,
+    });
+    module.addCSourceFiles(.{
+        .files = options.game_sources,
+        .flags = cpp_flags,
+        .language = .cpp,
+    });
+    module.addCSourceFiles(.{
+        .files = &.{"hosts/sdl/host_sdl.cpp"},
+        .flags = cpp_flags,
+        .language = .cpp,
+    });
+
+    if (options.use_openmp) {
+        if (options.target.result.os.tag == .macos) {
+            module.addSystemIncludePath(pathFromOption(b, b.pathJoin(&.{ options.libomp_prefix, "include" })));
+            module.addLibraryPath(pathFromOption(b, b.pathJoin(&.{ options.libomp_prefix, "lib" })));
+            module.linkSystemLibrary("omp", .{ .use_pkg_config = .no });
+        } else {
+            module.linkSystemLibrary("gomp", .{ .use_pkg_config = .no });
+        }
+    }
+
+    const packages = [_][]const u8{
+        "SDL2_ttf",
+        "libavcodec",
+        "libavformat",
+        "libavutil",
+        "libswscale",
+    };
+    for (packages) |package| {
+        module.linkSystemLibrary(package, .{ .use_pkg_config = .force });
+    }
+
+    const exe = b.addExecutable(.{
+        .name = options.name,
+        .root_module = module,
+        .use_llvm = true,
+        .use_lld = if (options.use_lto) true else null,
+    });
     exe.lto = if (options.use_lto) .full else .none;
 
     return b.addInstallArtifact(exe, .{});
