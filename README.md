@@ -127,7 +127,20 @@ zig build harlequin
 # Useful overrides
 zig build eshi -Doptimize=Debug -Dopenmp=false
 zig build eshi -Dsumi-path=../libsumi
+
+# Build the OpenGL renderer path (off by default)
+zig build examples -Dopengl=true
 ```
+
+`-Dopengl` builds the OpenGL backend in `renderer_gl.h`, which needs the
+system GL library (`-framework OpenGL` on macOS, `libGL` elsewhere). It is off
+by default for two reasons: on macOS it takes precedence over Metal, because
+`main.cpp` tries CUDA, then OpenGL, then Metal; and elsewhere it would add a
+libGL requirement to builds that are content on the CPU path.
+
+Prefer enabling it when changing anything shared with the GPU backends —
+especially the shader transpiler, whose rules differ per target and are easy
+to fix on one backend while breaking the other.
 
 Both build paths use `pkg-config` for SDL2 and FFmpeg. On macOS, the Zig build
 enables Metal and uses Homebrew's `libomp`; override a nonstandard installation

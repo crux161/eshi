@@ -170,6 +170,19 @@ std::string glsl_rules(std::string line) {
         "\\(\\s*(float|int|uint|bool)\\s*\\)\\s*([A-Za-z_][A-Za-z0-9_]*|[0-9]+\\.?[0-9]*f?)");
     line = std::regex_replace(line, c_cast_simple, "$1($2)");
 
+    /*
+     * noise1..noise4 are reserved GLSL built-ins returning genType, so a
+     * shader that defines its own — aurora.cpp declares `float noise2(vec2)` —
+     * is a return-type redeclaration and will not compile. MSL has no such
+     * names, which is why this is GLSL-only.
+     *
+     * Renaming definition and call sites together keeps the shader
+     * self-consistent. Nothing is lost: the built-ins are deprecated, removed
+     * from core profiles, and return 0 on most drivers anyway.
+     */
+    static const std::regex reserved_noise("\\bnoise([1-4])\\b");
+    line = std::regex_replace(line, reserved_noise, "eshi_noise$1");
+
     return line;
 }
 

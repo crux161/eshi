@@ -47,11 +47,24 @@ pub fn build(b: *std.Build) void {
         "lto",
         "Enable LTO (default: false on macOS, true elsewhere)",
     ) orelse !is_macos;
-    const use_gl = b.option(
+    // The legacy shadertoy path in main.cpp/renderer_gl.h. Unlike Larimar's
+    // GL backend, this one includes SDL_opengl.h and calls core GL entry
+    // points directly, so it needs the system GL library at link time.
+    //
+    // Default off: on macOS enabling it also *takes precedence over Metal*,
+    // because main.cpp's dispatch tries CUDA, then OpenGL, then Metal; and
+    // elsewhere it would add a libGL requirement to builds that are happy on
+    // the CPU path today. Opt in with -Dopengl=true.
+    //
+    // Before this option existed, USE_OPENGL was defined only by
+    // scripts/build.arm64.bat, so neither the Makefile nor this build graph
+    // ever compiled the file — which is how a vertical flip, an RGB/RGBA
+    // mismatch, an ignored stride and several transpiler gaps survived in it.
+    const use_opengl = b.option(
         bool,
-        "gl",
-        "Build the Larimar OpenGL backend, Kantei grade Paper (default: true)",
-    ) orelse true;
+        "opengl",
+        "Build the legacy OpenGL renderer path (default: false; on macOS it takes precedence over Metal)",
+    ) orelse false;
 
     if (use_metal and !is_macos) {
         std.debug.panic("-Dmetal=true is only supported for macOS targets", .{});
@@ -97,7 +110,6 @@ pub fn build(b: *std.Build) void {
         .libomp_prefix = libomp_prefix,
         .use_openmp = use_openmp,
         .use_metal = use_metal,
-        .use_gl = use_gl,
         .use_lto = use_lto,
     });
     const larimar_step = b.step("larimar", "Build the Larimar core and the SDL host (pong)");
@@ -143,6 +155,7 @@ pub fn build(b: *std.Build) void {
         .sumi_include = sumi_include,
         .libomp_prefix = libomp_prefix,
         .use_metal = use_metal,
+        .use_opengl = use_opengl,
         .use_openmp = use_openmp,
         .use_lto = use_lto,
     });
@@ -159,6 +172,7 @@ pub fn build(b: *std.Build) void {
             .sumi_include = sumi_include,
             .libomp_prefix = libomp_prefix,
             .use_metal = use_metal,
+            .use_opengl = use_opengl,
             .use_openmp = use_openmp,
             .use_lto = use_lto,
         });
@@ -178,6 +192,7 @@ const ExecutableOptions = struct {
     sumi_include: []const u8,
     libomp_prefix: []const u8,
     use_metal: bool,
+    use_opengl: bool,
     use_openmp: bool,
     use_lto: bool,
 };
@@ -208,6 +223,18 @@ fn addEshiExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
         .flags = cpp_flags,
         .language = .cpp,
     });
+
+    if (options.use_opengl) {
+        module.addCMacro("USE_OPENGL", "1");
+        // renderer_gl.h includes SDL_opengl.h and calls core GL entry points
+        // directly (glReadPixels, glViewport, glDrawArrays, ...), so unlike
+        // Larimar's backend this one needs the system GL library.
+        if (options.target.result.os.tag == .macos) {
+            module.linkFramework("OpenGL", .{});
+        } else {
+            module.linkSystemLibrary("GL", .{ .use_pkg_config = .no });
+        }
+    }
 
     if (options.use_metal) {
         module.addCMacro("USE_METAL", "1");
@@ -278,7 +305,6 @@ const LarimarOptions = struct {
     libomp_prefix: []const u8,
     use_openmp: bool,
     use_metal: bool,
-    use_gl: bool,
     use_lto: bool,
 };
 
@@ -307,26 +333,20 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
     else
         &.{ "-std=c++11", "-Wall", "-Wextra" };
 
-    // Kantei Grade 2 (Paper). The core links no windowing library, so the host
-    // supplies GL entry points through eshi_gl_set_proc_loader().
-    if (options.use_gl) module.addCMacro("ESHI_HAVE_GL", "1");
+    // Kantei Grade 2 (Paper). Always built: the core declares its own GL
+    // typedefs and resolves every entry point through the loader the host
+    // passes to eshi_gl_set_proc_loader(), so it links no GL library and no
+    // windowing library. There is nothing to gate.
+    module.addCMacro("ESHI_HAVE_GL", "1");
 
     module.addCSourceFiles(.{
-        .files = if (options.use_gl)
-            &.{
-                "core/src/world.cpp",
-                "core/src/render/registry.cpp",
-                "core/src/render/transpile.cpp",
-                "core/src/render/ink.cpp",
-                "core/src/render/gl.cpp",
-            }
-        else
-            &.{
-                "core/src/world.cpp",
-                "core/src/render/registry.cpp",
-                "core/src/render/transpile.cpp",
-                "core/src/render/ink.cpp",
-            },
+        .files = &.{
+            "core/src/world.cpp",
+            "core/src/render/registry.cpp",
+            "core/src/render/transpile.cpp",
+            "core/src/render/ink.cpp",
+            "core/src/render/gl.cpp",
+        },
         .flags = cpp_flags,
         .language = .cpp,
     });
