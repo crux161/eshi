@@ -136,6 +136,8 @@ int main(int argc, char** argv) {
     // 240-frame render just to read one line of output is both slow and
     // flaky.
     bool validate_only = false;
+    EncoderBackend encoder_backend = EncoderBackend::Auto;
+    EncoderCodec   encoder_codec = EncoderCodec::H264;
     std::string output_name = "output.mp4";
 
     std::string bin_name = "eshi";
@@ -153,6 +155,14 @@ int main(int argc, char** argv) {
         if(arg == "--gpu")  use_gpu = true;
         if(arg == "--live") live_mode = true;
         if(arg == "--validate") validate_only = true;
+        if(arg == "--hevc") encoder_codec = EncoderCodec::HEVC;
+        if(arg == "--encoder" && i + 1 < argc) {
+            const std::string mode = argv[++i];
+            if (mode == "hw" || mode == "hardware") encoder_backend = EncoderBackend::Hardware;
+            else if (mode == "sw" || mode == "software") encoder_backend = EncoderBackend::Software;
+            else if (mode == "auto") encoder_backend = EncoderBackend::Auto;
+            else fprintf(stderr, "unknown --encoder mode '%s' (auto|hw|sw)\n", mode.c_str());
+        }
         if(arg == "--res") {
             if (i + 1 < argc) {
                 std::string res_str = argv[++i]; 
@@ -354,7 +364,7 @@ int main(int argc, char** argv) {
 
     } else {
         const int FRAMES = 240;
-        SimpleEncoder video(output_name.c_str(), W, H, FPS);
+        SimpleEncoder video(output_name.c_str(), W, H, FPS, encoder_backend, encoder_codec);
         
         for (int i = 0; i < FRAMES; ++i) {
             float time = (float)i / (float)FPS;

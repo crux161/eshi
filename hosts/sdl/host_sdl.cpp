@@ -111,6 +111,7 @@ void print_usage(const char* argv0) {
         "  --grade G    Kantei tier: ink, paper, brush, gold. Default ink.\n"
         "  --dump DIR   Write every frame to DIR as raw PPM. The cross-tier\n"
         "               conformance oracle: no codec in the measurement path.\n"
+        "  --encoder M  Video encoder: auto, hw (Apple media engine), sw.\n"
         "  --gallery    Run the ripple gallery shader instead of pong. Required\n"
         "               for the GPU tiers, which cannot execute pong's typed\n"
         "               uniform struct.\n",
@@ -128,6 +129,7 @@ int main(int argc, char** argv) {
     bool        hash_only = false;
     bool        gallery = false;
     std::string dump_dir;
+    EncoderBackend encoder_backend = EncoderBackend::Auto;
     EshiGrade   grade = ESHI_GRADE_INK;
     int         frames = 600;
     uint64_t    seed = 0x5EED5EEDull;
@@ -154,6 +156,14 @@ int main(int argc, char** argv) {
             hash_only = true;
         } else if (arg == "--dump" && i + 1 < argc) {
             dump_dir = argv[++i];
+        } else if (arg == "--encoder" && i + 1 < argc) {
+            const std::string mode = argv[++i];
+            if (mode == "hw" || mode == "hardware") encoder_backend = EncoderBackend::Hardware;
+            else if (mode == "sw" || mode == "software") encoder_backend = EncoderBackend::Software;
+            else if (mode != "auto") {
+                std::fprintf(stderr, "unknown --encoder mode '%s' (auto|hw|sw)\n", mode.c_str());
+                return 1;
+            }
         } else if (arg == "--gallery") {
             gallery = true;
         } else if (arg == "--grade" && i + 1 < argc) {
@@ -348,7 +358,7 @@ int main(int argc, char** argv) {
          */
         std::printf("Encoding %d frames -> %s\n", frames, out_path.c_str());
 
-        SimpleEncoder video(out_path.c_str(), width, height, 60);
+        SimpleEncoder video(out_path.c_str(), width, height, 60, encoder_backend);
         const float fixed_dt = 1.0f / 60.0f;
 
         for (int i = 0; i < frames; ++i) {

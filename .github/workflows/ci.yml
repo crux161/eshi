@@ -53,6 +53,74 @@ jobs:
           GALLIUM_DRIVER: llvmpipe
         run: xvfb-run -a ./scripts/check_gpu_shaders.sh
 
+  # The other half of the transpiler check. Its GLSL and MSL rules diverged
+  # repeatedly — a missing glsl:: strip, a hardcoded swizzle list, atan2f
+  # mapped to the wrong builtin — each time compiling cleanly on one target
+  # while failing on the other. Neither job alone would have caught those.
+  metal:
+    name: Metal path (macOS, Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.16.0
+
+      - name: Install dependencies
+        run: brew install pkg-config ffmpeg sdl2 sdl2_ttf libomp
+
+      - name: Fetch libsumi
+        run: ./scripts/vendor.sh
+
+      # Metal is on by default here and LTO is off by default on macOS, since
+      # Zig's LLD cannot link Mach-O with it.
+      - name: Build everything
+        run: zig build
+
+      # A hosted macOS runner is virtualized, and Metal is not guaranteed. The
+      # shader check must not turn "no GPU in the VM" into a red build that
+      # looks like a transpiler regression, so probe first and say plainly
+      # which happened.
+      - name: Detect Metal availability
+        id: metal
+        run: |
+          set -eu
+          # Fail rather than probe a binary that is not there. A missing
+          # executable would otherwise read as "no Metal", silently skipping
+          # the validation this job exists to run.
+          test -x ./zig-out/bin/eshi || {
+            echo '::error::zig-out/bin/eshi missing — the build step did not produce it.'
+            exit 1
+          }
+          if ./zig-out/bin/eshi --gpu --validate --res 64x64 2>&1 | grep -q 'backend=metal'; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::No Metal device on this runner; skipping Metal shader validation.'
+          fi
+
+      - name: Validate every shader reaches the Metal backend
+        if: steps.metal.outputs.available == 'true'
+        run: ./scripts/check_gpu_shaders.sh
+
+      - name: Larimar core tests
+        run: zig build test
+
+      # Exercises both encoder paths and confirms each produces a decodable
+      # stream. It deliberately does not assert that hardware was selected:
+      # VideoToolbox can be absent under virtualization, and falling back to
+      # software is the designed behaviour, not a failure.
+      - name: Video export, software and Apple media engine
+        run: |
+          set -eu
+          for mode in sw auto; do
+            ./zig-out/bin/pong --grade ink --res 320x180 --frames 30 \
+              --encoder "$mode" --out "out-$mode.mp4" | grep 'Video Encoder:'
+            ffprobe -v error -select_streams v:0 \
+              -show_entries stream=codec_name,width,height -of csv=p=0 "out-$mode.mp4"
+          done
+
   # Baseline, so a failure above can be read as "the GL path broke" rather
   # than "something broke". Deliberately minimal — this is not meant to grow
   # into a full matrix without a reason.

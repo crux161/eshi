@@ -284,6 +284,27 @@ You can also run the built binaries directly from the `build/` folder:
 * `--gpu`: Use hardware acceleration (CUDA on x64, OpenGL on Arm64).
 * `--live`: Render to window instead of file.
 * `--res WxH`: Set resolution (e.g., `--res 1920x1080`). Default is 960x540.
+* `--encoder auto|hw|sw`: Video encoder. Default `auto`.
+* `--hevc`: Encode HEVC instead of H.264.
+* `--validate`: Initialize the renderer, report the backend, and exit.
+
+#### 🍏 Hardware video encoding
+
+On Apple Silicon, `--encoder auto` (the default) routes H.264 and HEVC through
+VideoToolbox and the dedicated media engine instead of libx264. That is roughly
+**2.4× faster** end to end at 1080p and leaves the CPU cores for rendering —
+which matters most on the CPU tier, where the renderer wants all of them.
+
+Measured against the raw rendered frames rather than against each other, both
+encoders are faithful: **46.3 dB** PSNR for libx264, **45.6 dB** for
+VideoToolbox. The ~0.7 dB is the usual hardware-encoder trade at equal bitrate,
+and both sit well above the ~40 dB that reads as visually identical.
+
+`hw` demands hardware and fails if it is unavailable; `sw` forces libx264.
+Use `sw` when output needs to be comparable across machines — hardware encoders
+make no bit-reproducibility guarantee across silicon or driver revisions.
+`auto` falls back to software if VideoToolbox is missing or refuses a session,
+which it can do under virtualization.
 
 ___
 
