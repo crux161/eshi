@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**', 'feature/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The reason this workflow exists. USE_OPENGL was defined only by
+  # scripts/build.arm64.bat, so neither the Makefile nor build.zig ever
+  # compiled renderer_gl.h — and it accumulated a vertical flip, an RGB/RGBA
+  # mismatch, an ignored stride, silent shader-compile failures and a drawer
+  # of transpiler gaps, none of which any routine build would have caught.
+  #
+  # The transpiler is the specific hazard: its rules differ per target, so a
+  # fix verified on Metal can silently break GLSL. Only building both catches
+  # that.
+  opengl:
+    name: OpenGL path (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.16.0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libsdl2-dev libsdl2-ttf-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+            libgl1-mesa-dev libglu1-mesa-dev mesa-utils \
+            xvfb
+
+      - name: Fetch libsumi
+        run: ./scripts/vendor.sh
+
+      - name: Build with the OpenGL backend
+        run: zig build examples -Dopengl=true
+
+      # A GitHub runner has no GPU and no display. Xvfb supplies the X server
+      # SDL needs to create a context, and Mesa's llvmpipe supplies GL 3.3 in
+      # software. That is slow and completely fine here: the assertion is that
+      # each shader *compiles and links* on the GL backend, not that it is
+      # fast. The transpiler is the thing under test.
+      - name: Validate every shader reaches the GL backend
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: xvfb-run -a ./scripts/check_gpu_shaders.sh
+
+  # Baseline, so a failure above can be read as "the GL path broke" rather
+  # than "something broke". Deliberately minimal — this is not meant to grow
+  # into a full matrix without a reason.
+  core:
+    name: Larimar core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.16.0
+
+      # The core links no SDL, no FFmpeg and not even libsumi. If this step
+      # ever needs a dependency installed, the OS-oblivious boundary in
+      # docs/larimar/ARCHITECTURE.md §5 has been broken.
+      - name: Run core tests
+        run: zig build test

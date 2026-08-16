@@ -142,6 +142,23 @@ Prefer enabling it when changing anything shared with the GPU backends —
 especially the shader transpiler, whose rules differ per target and are easy
 to fix on one backend while breaking the other.
 
+To check that every gallery shader actually reaches the GPU backend rather
+than falling back to the CPU:
+
+```bash
+scripts/check_gpu_shaders.sh
+```
+
+It runs each binary with `--validate`, which initializes the renderer, reports
+which backend came up, and exits non-zero if a requested GPU backend fell
+through. Pass a directory to check a non-default build, e.g.
+`scripts/check_gpu_shaders.sh build-gl/bin`. CI runs this on Linux under Xvfb
+with Mesa's llvmpipe; see `.github/workflows/ci.yml`.
+
+Run the shaders one at a time. Concurrent runs contend over GL contexts badly
+enough that unrelated shaders report empty output and look like compile
+failures — the script is sequential on purpose.
+
 Both build paths use `pkg-config` for SDL2 and FFmpeg. On macOS, the Zig build
 enables Metal and uses Homebrew's `libomp`; override a nonstandard installation
 with `-Dlibomp-prefix=/path/to/libomp`.

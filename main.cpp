@@ -130,6 +130,12 @@ int main(int argc, char** argv) {
     
     bool use_gpu = false;
     bool live_mode = false;
+    // Initialize the renderer, report which backend came up, and exit without
+    // rendering. CI needs to assert that a shader actually reached the GPU
+    // backend rather than silently falling back to the CPU, and timing a
+    // 240-frame render just to read one line of output is both slow and
+    // flaky.
+    bool validate_only = false;
     std::string output_name = "output.mp4";
 
     std::string bin_name = "eshi";
@@ -146,6 +152,7 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if(arg == "--gpu")  use_gpu = true;
         if(arg == "--live") live_mode = true;
+        if(arg == "--validate") validate_only = true;
         if(arg == "--res") {
             if (i + 1 < argc) {
                 std::string res_str = argv[++i]; 
@@ -278,7 +285,33 @@ int main(int argc, char** argv) {
     
     if (texData) stbi_image_free(texData);
 
-    if (live_mode) {
+    int exit_code = 0;
+
+    // cpu_renderer is allocated only when no GPU backend is active — either
+    // none was asked for, or the one that was asked for failed to build the
+    // shader and fell through. That makes it the authoritative answer to
+    // "did the GPU path work", which is exactly what --validate reports.
+    const bool gpu_active = (cpu_renderer == nullptr);
+
+    if (validate_only) {
+        const char* backend = "cpu";
+        #ifdef USE_CUDA
+        if (gpu_renderer) backend = "cuda";
+        #endif
+        #ifdef USE_OPENGL
+        if (gl_renderer) backend = "opengl";
+        #endif
+        #ifdef USE_METAL
+        if (metal_renderer) backend = "metal";
+        #endif
+
+        if (use_gpu && !gpu_active) {
+            printf("[validate] FAIL %s: requested GPU, fell back to CPU\n", bin_name.c_str());
+            exit_code = 1;
+        } else {
+            printf("[validate] ok %s: backend=%s\n", bin_name.c_str(), backend);
+        }
+    } else if (live_mode) {
         Display window(W, H, "Eshi Live Preview");
         auto start_time_clock = std::chrono::high_resolution_clock::now();
         
@@ -361,5 +394,5 @@ int main(int argc, char** argv) {
     
     SDL_Quit();
 
-    return 0;
+    return exit_code;
 }
