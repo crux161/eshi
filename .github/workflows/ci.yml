@@ -40,7 +40,10 @@ jobs:
         run: ./scripts/vendor.sh
 
       - name: Build with the OpenGL backend
-        run: zig build examples -Dopengl=true
+        # This job gates the GPU/transpiler path. Keep the CPU OpenMP backend
+        # out of this build so a runner's GCC runtime layout cannot prevent the
+        # shaders from reaching the OpenGL validation this job exists to run.
+        run: zig build examples -Dopengl=true -Dopenmp=false
 
       # A GitHub runner has no GPU and no display. Xvfb supplies the X server
       # SDL needs to create a context, and Mesa's llvmpipe supplies GL 3.3 in
