@@ -1,0 +1,18 @@
+# Run from this directory with `dart run ffigen --config ffigen.yaml`.
+name: LarimarNativeBindings
+description: Generated bindings for Larimar's public C99 API.
+output: lib/src/generated/larimar_bindings_generated.dart
+headers:
+  entry-points:
+    - ../../../core/include/eshi/eshi.h
+  include-directives:
+    - ../../../core/include/eshi/eshi.h
+ffi-native:
+silence-enum-warning: true # ABI v1 requires and probes 32-bit public enums.
+preamble: |
+  // AUTO GENERATED FILE, DO NOT EDIT.
+  // Regenerate with `dart run ffigen --config ffigen.yaml`.
+  // ignore_for_file: camel_case_types, non_constant_identifier_names
+comments:
+  style: any
+  length: full

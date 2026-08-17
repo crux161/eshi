@@ -187,3 +187,65 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: zig build test-sanitize
+
+  dart_linux:
+    name: Dart FFI (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.38.9
+          cache: true
+
+      - name: Install binding toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang libclang-dev
+
+      - name: Check generated bindings
+        working-directory: bindings/dart/larimar
+        run: |
+          dart pub get
+          ../../../scripts/check_dart_bindings.sh
+
+      - name: Analyze and test the Dart package
+        working-directory: bindings/dart/larimar
+        run: |
+          dart analyze
+          dart test --reporter expanded
+
+      - name: Analyze and test the Flutter reference app
+        working-directory: examples/larimar_flutter
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test --reporter expanded
+
+  dart_macos:
+    name: Dart FFI (macOS, Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.38.9
+          cache: true
+
+      - name: Analyze and test the Dart package
+        working-directory: bindings/dart/larimar
+        run: |
+          dart pub get
+          dart analyze
+          dart test --reporter expanded
+
+      - name: Analyze and test the Flutter reference app
+        working-directory: examples/larimar_flutter
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test --reporter expanded
