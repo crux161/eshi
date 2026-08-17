@@ -81,7 +81,7 @@ claim shipping console support or superiority that has not been measured.
 Each step ends in an independently checkable gate. A later step may start only
 when its dependency and gate are green.
 
-### Step 1 — Restore and freeze the release gate (in progress)
+### Step 1 — Restore and freeze the release gate — **complete**
 
 The first run for `8f915e6` failed before repository code executed. All three
 jobs used `mlugg/setup-zig@v1`, which requested stable Zig 0.16.0 from the
@@ -91,12 +91,14 @@ maintained `@v2` action while retaining the project's tested Zig 0.16.0 pin.
 - [x] Diagnose [run 32055999900](https://github.com/crux161/eshi/actions/runs/32055999900).
 - [x] Update all three setup steps from `mlugg/setup-zig@v1` to `@v2`.
 - [x] Run `zig build test` locally with Zig 0.16.0 (132 checks, 0 failures).
-- [ ] Push the fix and require all CI jobs to execute project code and pass.
-- [ ] Make CI required on the RC integration branch; protect against direct
-      release-tag creation from a red commit.
+- [x] Push the fix and require all CI jobs to execute project code and pass —
+      [run 32058143629](https://github.com/crux161/eshi/actions/runs/32058143629)
+      is green on commit `2c2c8288`.
+- [x] Protect `feat/larimar` with strict GitHub Actions checks, enforced for
+      admins; disable force-pushes and branch deletion.
 
-Gate: core, OpenGL, and Metal jobs all get past toolchain setup and pass. A
-remote green run is required; local success alone does not close this step.
+Gate met: core, OpenGL, and Metal jobs all execute project code and pass, and
+GitHub will not update the RC integration branch unless those checks are green.
 
 ### Step 2 — Freeze the native contract
 
@@ -209,6 +211,8 @@ Dependency: Step 7.
   and create a release branch from a green commit.
 - Publish macOS arm64 native artifacts, the Flutter package, symbols, checksums,
   SBOM, licenses/NOTICE, example source, changelog, and known limitations.
+- Restrict release-tag creation to the gated release workflow so a red commit
+  cannot be tagged directly.
 - Verify the documented quick start in a clean environment, then tag the exact
   verified commit. Preserve a rollback path to the last green artifact set.
 
@@ -228,7 +232,7 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 | Hot reload from Dart | 100-reload integration scenario | Missing |
 | Multi-view/shared state | Two cameras, one world/assets | Missing |
 | glTF PBR + touch tag | One reference GLB and event | Missing |
-| Release engineering | Green required CI and installable artifacts | Step 1 started |
+| Release engineering | Green required CI and installable artifacts | Step 1 complete; packaging remains |
 
 ## 6. Decision rules and risks
 
