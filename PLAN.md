@@ -117,20 +117,24 @@ validates every public layout (187 checks); the core round-trips both golden
 streams and hostile inputs (238 checks), and `zig build test-sanitize` reports
 no ASan/UBSan findings.
 
-### Step 3 — Create the Dart/Flutter package
+### Step 3 — Create the Dart/Flutter package — **complete**
 
 Dependency: Step 2.
 
-- Scaffold `bindings/dart/larimar` as a Flutter FFI plugin and
+- [x] Scaffold `bindings/dart/larimar` as a Flutter FFI plugin and
   `examples/larimar_flutter` as the reference application.
-- Generate bindings from `core/include/eshi/eshi.h` with `ffigen`; check in the
+- [x] Generate bindings from `core/include/eshi/eshi.h` with `ffigen`; check in the
   generated file and add a CI drift check.
-- Implement safe Dart ownership wrappers, typed command/event views, epochs,
+- [x] Implement safe Dart ownership wrappers, typed command/event views, epochs,
   error mapping, and deterministic disposal.
-- Mirror C++ golden fixtures in Dart tests before building widgets.
+- [x] Mirror C++ golden fixtures in Dart tests before building widgets.
 
-Gate: `dart analyze`, Dart unit tests, binding-drift CI, and a native library
-load/flush/drain smoke test pass on macOS and Linux.
+Gate met: [run 32064758876](https://github.com/crux161/eshi/actions/runs/32064758876)
+passes the binding-drift check, `dart analyze`, nine Dart tests including a real
+native code-asset load/flush/tick/drain smoke, and the Flutter reference app's
+analysis/widget test on Linux x86_64 and macOS Apple Silicon. Both Dart FFI jobs
+are strict required checks on `feat/larimar`; the scaffolded macOS application
+also builds locally with the native library embedded.
 
 ### Step 4 — Land `EshiView` on macOS
 
@@ -226,15 +230,15 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 | Area | RC0 evidence | Current state |
 |---|---|---|
 | Native ECS and deterministic simulation | 132 core checks; stable Pong digest | Implemented |
-| Retained scene + bulk FFI transport | Reload invariant and epoch tests | Native half implemented |
+| Retained scene + bulk FFI transport | Reload invariant and epoch tests | Dart/native transport implemented; Flutter reload proof remains |
 | Render capability ladder | Ink/Paper/Brush; 1-LSB conformance target | Implemented for fullscreen materials |
 | Filament | Pong First Light through `.filamat` | 3D scene work missing |
-| Dart API | Generated, version-checked package | Missing |
+| Dart API | Generated, version-checked package | Implemented and drift-gated |
 | Flutter composition | macOS `EshiView` external texture | Missing |
 | Hot reload from Dart | 100-reload integration scenario | Missing |
 | Multi-view/shared state | Two cameras, one world/assets | Missing |
 | glTF PBR + touch tag | One reference GLB and event | Missing |
-| Release engineering | Green required CI and installable artifacts | Step 1 complete; packaging remains |
+| Release engineering | Green required CI and installable artifacts | Steps 1 and 3 gated; packaging remains |
 
 ## 6. Decision rules and risks
 
