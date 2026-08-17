@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**', 'feature/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The reason this workflow exists. USE_OPENGL was defined only by
+  # scripts/build.arm64.bat, so neither the Makefile nor build.zig ever
+  # compiled renderer_gl.h — and it accumulated a vertical flip, an RGB/RGBA
+  # mismatch, an ignored stride, silent shader-compile failures and a drawer
+  # of transpiler gaps, none of which any routine build would have caught.
+  #
+  # The transpiler is the specific hazard: its rules differ per target, so a
+  # fix verified on Metal can silently break GLSL. Only building both catches
+  # that.
+  opengl:
+    name: OpenGL path (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libsdl2-dev libsdl2-ttf-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+            libgl1-mesa-dev libglu1-mesa-dev mesa-utils \
+            xvfb
+
+      - name: Fetch libsumi
+        run: ./scripts/vendor.sh
+
+      - name: Build with the OpenGL backend
+        # This job gates the GPU/transpiler path. Keep the CPU OpenMP backend
+        # out of this build so a runner's GCC runtime layout cannot prevent the
+        # shaders from reaching the OpenGL validation this job exists to run.
+        run: zig build examples -Dopengl=true -Dopenmp=false
+
+      # A GitHub runner has no GPU and no display. Xvfb supplies the X server
+      # SDL needs to create a context, and Mesa's llvmpipe supplies GL 3.3 in
+      # software. That is slow and completely fine here: the assertion is that
+      # each shader *compiles and links* on the GL backend, not that it is
+      # fast. The transpiler is the thing under test.
+      - name: Validate every shader reaches the GL backend
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: xvfb-run -a ./scripts/check_gpu_shaders.sh
+
+  # The other half of the transpiler check. Its GLSL and MSL rules diverged
+  # repeatedly — a missing glsl:: strip, a hardcoded swizzle list, atan2f
+  # mapped to the wrong builtin — each time compiling cleanly on one target
+  # while failing on the other. Neither job alone would have caught those.
+  metal:
+    name: Metal path (macOS, Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install dependencies
+        run: brew install pkg-config ffmpeg sdl2 sdl2_ttf libomp
+
+      - name: Fetch libsumi
+        run: ./scripts/vendor.sh
+
+      # Metal is on by default here and LTO is off by default on macOS, since
+      # Zig's LLD cannot link Mach-O with it.
+      - name: Build everything
+        run: zig build
+
+      # A hosted macOS runner is virtualized, and Metal is not guaranteed. The
+      # shader check must not turn "no GPU in the VM" into a red build that
+      # looks like a transpiler regression, so probe first and say plainly
+      # which happened.
+      - name: Detect Metal availability
+        id: metal
+        run: |
+          set -eu
+          # Fail rather than probe a binary that is not there. A missing
+          # executable would otherwise read as "no Metal", silently skipping
+          # the validation this job exists to run.
+          test -x ./zig-out/bin/eshi || {
+            echo '::error::zig-out/bin/eshi missing — the build step did not produce it.'
+            exit 1
+          }
+          if ./zig-out/bin/eshi --gpu --validate --res 64x64 2>&1 | grep -q 'backend=metal'; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::No Metal device on this runner; skipping Metal shader validation.'
+          fi
+
+      - name: Validate every shader reaches the Metal backend
+        if: steps.metal.outputs.available == 'true'
+        run: ./scripts/check_gpu_shaders.sh
+
+      - name: Larimar core tests
+        run: zig build test
+
+      # The retained-scene claim in ARCHITECTURE.md §6.6, as a gate rather than a
+      # paragraph. --reload 1 re-submits the entire scene description on every
+      # frame; if the reconciler starts duplicating entities or stomping
+      # simulated state, the digest moves. That is the exact failure Flutter's
+      # hot reload would otherwise hand us in Phase 3, and it is far cheaper to
+      # catch here than through an embedder.
+      #
+      # The non-degeneracy check below is not decoration. A reconciler broken
+      # *uniformly* — say one whose key lookup always misses — breaks the
+      # baseline and the reload run identically, and comparing the two would
+      # then pass while nothing worked at all. A pong that scores 0-0 over 400
+      # frames has a scene that never resolved, so the score is the cheap proof
+      # that there was something here to keep invariant.
+      - name: Scene reload is a no-op
+        run: |
+          set -eu
+          baseline=$(./zig-out/bin/pong --grade ink --res 320x180 \
+            --frames 400 --seed 42 --hash | tail -1)
+          reloaded=$(./zig-out/bin/pong --grade ink --res 320x180 \
+            --frames 400 --seed 42 --hash --reload 1 | tail -1)
+          echo "baseline: $baseline"
+          echo "reloaded: $reloaded"
+          case "$baseline" in
+            *"score=0-0"*)
+              echo '::error::Pong scored nothing in 400 frames; the scene never reconciled.'
+              exit 1 ;;
+          esac
+          if [ "$baseline" != "$reloaded" ]; then
+            echo '::error::Re-submitting the scene changed the frame output; the reconciler is no longer retained.'
+            exit 1
+          fi
+          case "$reloaded" in
+            *"entities=5 nodes=5"*) ;;
+            *) echo '::error::Scene entity count drifted under repeated reloads.'; exit 1 ;;
+          esac
+
+      # Exercises both encoder paths and confirms each produces a decodable
+      # stream. It deliberately does not assert that hardware was selected:
+      # VideoToolbox can be absent under virtualization, and falling back to
+      # software is the designed behaviour, not a failure.
+      - name: Video export, software and Apple media engine
+        run: |
+          set -eu
+          for mode in sw auto; do
+            ./zig-out/bin/pong --grade ink --res 320x180 --frames 30 \
+              --encoder "$mode" --out "out-$mode.mp4" | grep 'Video Encoder:'
+            ffprobe -v error -select_streams v:0 \
+              -show_entries stream=codec_name,width,height -of csv=p=0 "out-$mode.mp4"
+          done
+
+  # Baseline, so a failure above can be read as "the GL path broke" rather
+  # than "something broke". Deliberately minimal — this is not meant to grow
+  # into a full matrix without a reason.
+  core:
+    name: Larimar core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      # The core links no SDL, no FFmpeg and not even libsumi. If this step
+      # ever needs a dependency installed, the OS-oblivious boundary in
+      # docs/larimar/ARCHITECTURE.md §5 has been broken.
+      - name: Run core tests
+        run: zig build test
+
+      - name: Load and validate the release C ABI
+        run: zig build abi-test
+
+      - name: Run core tests under ASan and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: zig build test-sanitize

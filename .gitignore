@@ -14,12 +14,16 @@ clean.py
 *.o
 *.o.tmp
 .zig-cache/
+zig-out/
 
 # --- Extras ---
 VENDORED
 sumi
 /libsumi/
-vendor.sh
+
+# --- res ---
+resources/gl3d/
+resources/gl2d/
 
 # vcpkg
 vcpkg_installed/
@@ -63,3 +67,7 @@ x/
 # --- OS Junk ---
 Thumbs.db
 .DS_Store
+
+# Larimar reference material — untracked loose copies, not dependencies
+resources/gyosho/
+resources/SumiC/

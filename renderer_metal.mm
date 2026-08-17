@@ -34,6 +34,12 @@ static std::string replaceAll(std::string str, const std::string& from, const st
     return str;
 }
 
+static int countChar(const std::string& s, char c) {
+    int n = 0;
+    for (size_t i = 0; i < s.size(); ++i) if (s[i] == c) ++n;
+    return n;
+}
+
 static std::string readFile(std::string path) {
     std::string cleanPath = resolvePath(path);
     if (cleanPath.empty()) {
@@ -42,11 +48,24 @@ static std::string readFile(std::string path) {
 
     std::ifstream f(cleanPath);
     std::string content, line;
+    int skipDepth = 0;
     while(std::getline(f, line)) {
+        // A host-only declaration that opens a block must take its body with
+        // it; dropping only the signature leaves the body at program scope.
+        // mario.cpp and tunnelwisp.cpp both define `extern "C" mainSound(...)`
+        // for the audio thread, which is host code, not shader code.
+        if (skipDepth > 0) {
+            skipDepth += countChar(line, '{') - countChar(line, '}');
+            continue;
+        }
         if(line.find("#include") != std::string::npos) continue;
         if(line.find("#pragma") != std::string::npos) continue;
         if(line.find("using namespace") != std::string::npos) continue;
-        if(line.find("extern") != std::string::npos) continue; 
+        if(line.find("extern") != std::string::npos) {
+            const int opened = countChar(line, '{') - countChar(line, '}');
+            if (opened > 0) skipDepth = opened;
+            continue;
+        }
         
         line = replaceAll(line, "inline ", "");
         line = replaceAll(line, "glsl::", "");
@@ -118,18 +137,41 @@ MetalRenderer::MetalRenderer(int w, int h, const char* shaderPath, float* texDat
         "#define asinf asin\n"
         "#define acosf acos\n"
         "#define atanf atan\n"
-        "#define atan2f atan\n"
+        // MSL splits one- and two-argument arctangent into atan and atan2,
+        // where GLSL overloads a single atan. Mapping this to plain atan is
+        // what stopped polar.cpp compiling here.
+        "#define atan2f atan2\n"
         "#define powf pow\n"
         "#define expf exp\n"
+        "#define exp2f exp2\n"
         "#define logf log\n"
+        "#define log2f log2\n"
         "#define sqrtf sqrt\n"
         "#define fabsf abs\n"
         "#define floorf floor\n"
         "#define ceilf ceil\n"
+        "#define roundf round\n"
+        "#define truncf trunc\n"
+        "#define tanhf tanh\n"
         "#define modf fmod\n"
         "#define fminf min\n"
         "#define fmaxf max\n"
+        // GLSL spells the modulo builtin `mod`; MSL only has `fmod`. Shaders
+        // written against the GLSL/libsumi spelling — mario.cpp among them —
+        // do not compile without this. `modf` below is a distinct
+        // preprocessor token, so the two defines do not interfere.
+        "#define mod fmod\n"
         "#define glsl_core_h\n"
+        // libsumi and GLSL overload atan for one and two arguments; MSL has
+        // only the one-argument form plus a separately named atan2.
+        // polar.cpp calls the two-argument form directly rather than through
+        // atan2f, so a #define cannot reach it — the fix depends on arity.
+        // These overloads do not hide metal::atan: the arities differ, so both
+        // land in a single overload set.
+        "static inline float  atan(float  y, float  x) { return atan2(y, x); }\n"
+        "static inline float2 atan(float2 y, float2 x) { return atan2(y, x); }\n"
+        "static inline float3 atan(float3 y, float3 x) { return atan2(y, x); }\n"
+        "static inline float4 atan(float4 y, float4 x) { return atan2(y, x); }\n"
         "constexpr sampler smp(coord::normalized, address::repeat, filter::linear);\n"
         + userCode + "\n"
         "kernel void computeMain(texture2d<float, access::write> outTexture [[texture(0)]],\n"

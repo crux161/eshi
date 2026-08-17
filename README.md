@@ -127,7 +127,84 @@ zig build harlequin
 # Useful overrides
 zig build eshi -Doptimize=Debug -Dopenmp=false
 zig build eshi -Dsumi-path=../libsumi
+
+# Build the OpenGL renderer path (off by default)
+zig build examples -Dopengl=true
 ```
+
+#### Larimar First Light with Filament
+
+Glow Pong is the first vertical slice of Larimar's data-oriented engine: the
+game owns only its scene, components, systems, and material while the SDL host
+and renderer remain interchangeable. Its Ink, Paper, and direct-Metal paths are
+built by `zig build larimar`.
+
+To run the same ECS-driven game through Google Filament, first install the
+vendored Filament distribution (one-time, incremental afterward), then enable
+the optional backend:
+
+```bash
+cd resources/filament
+./build.sh -i release filament matc
+cd ../..
+
+zig build larimar -Dfilament=true
+./zig-out/bin/pong --grade brush --live
+```
+
+The build compiles `examples/pong/pong.mat` with Filament's `matc`, installs the
+package at `zig-out/share/eshi/pong.filamat`, and maps Kantei Brush to Filament.
+The public C API does not expose Filament types. To consume an already-installed
+distribution instead, pass `-Dfilament-path=/path/to/filament`; use
+`-Dfilament-arch=...` when its library directory is not the inferred `arm64` or
+`x86_64`.
+
+#### Hot-reload safety, without Dart
+
+Pong's scene is a *description* submitted through the engine's command buffer,
+not a sequence of `eshi_entity_create()` calls. A reconciler diffs it against
+the live world by stable key, so re-submitting it is a no-op — which is what
+makes Flutter's hot reload safe later, since it re-runs `build()` without
+unwinding native state.
+
+`--reload N` re-submits that description every N frames. Retained mode means the
+digest must not move:
+
+```bash
+./zig-out/bin/pong --grade ink --res 320x180 --frames 400 --seed 42 --hash
+./zig-out/bin/pong --grade ink --res 320x180 --frames 400 --seed 42 --hash --reload 1
+```
+
+Both print `digest=b9321cc6ecbe3e26 … entities=5 nodes=5`, the second having
+re-described the whole scene 399 times along the way. Built imperatively, those
+same reloads would have left 2000 entities behind.
+
+`-Dopengl` builds the OpenGL backend in `renderer_gl.h`, which needs the
+system GL library (`-framework OpenGL` on macOS, `libGL` elsewhere). It is off
+by default for two reasons: on macOS it takes precedence over Metal, because
+`main.cpp` tries CUDA, then OpenGL, then Metal; and elsewhere it would add a
+libGL requirement to builds that are content on the CPU path.
+
+Prefer enabling it when changing anything shared with the GPU backends —
+especially the shader transpiler, whose rules differ per target and are easy
+to fix on one backend while breaking the other.
+
+To check that every gallery shader actually reaches the GPU backend rather
+than falling back to the CPU:
+
+```bash
+scripts/check_gpu_shaders.sh
+```
+
+It runs each binary with `--validate`, which initializes the renderer, reports
+which backend came up, and exits non-zero if a requested GPU backend fell
+through. Pass a directory to check a non-default build, e.g.
+`scripts/check_gpu_shaders.sh build-gl/bin`. CI runs this on Linux under Xvfb
+with Mesa's llvmpipe; see `.github/workflows/ci.yml`.
+
+Run the shaders one at a time. Concurrent runs contend over GL contexts badly
+enough that unrelated shaders report empty output and look like compile
+failures — the script is sequential on purpose.
 
 Both build paths use `pkg-config` for SDL2 and FFmpeg. On macOS, the Zig build
 enables Metal and uses Homebrew's `libomp`; override a nonstandard installation
@@ -254,6 +331,27 @@ You can also run the built binaries directly from the `build/` folder:
 * `--gpu`: Use hardware acceleration (CUDA on x64, OpenGL on Arm64).
 * `--live`: Render to window instead of file.
 * `--res WxH`: Set resolution (e.g., `--res 1920x1080`). Default is 960x540.
+* `--encoder auto|hw|sw`: Video encoder. Default `auto`.
+* `--hevc`: Encode HEVC instead of H.264.
+* `--validate`: Initialize the renderer, report the backend, and exit.
+
+#### 🍏 Hardware video encoding
+
+On Apple Silicon, `--encoder auto` (the default) routes H.264 and HEVC through
+VideoToolbox and the dedicated media engine instead of libx264. That is roughly
+**2.4× faster** end to end at 1080p and leaves the CPU cores for rendering —
+which matters most on the CPU tier, where the renderer wants all of them.
+
+Measured against the raw rendered frames rather than against each other, both
+encoders are faithful: **46.3 dB** PSNR for libx264, **45.6 dB** for
+VideoToolbox. The ~0.7 dB is the usual hardware-encoder trade at equal bitrate,
+and both sit well above the ~40 dB that reads as visually identical.
+
+`hw` demands hardware and fails if it is unavailable; `sw` forces libx264.
+Use `sw` when output needs to be comparable across machines — hardware encoders
+make no bit-reproducibility guarantee across silicon or driver revisions.
+`auto` falls back to software if VideoToolbox is missing or refuses a session,
+which it can do under virtualization.
 
 ___
 

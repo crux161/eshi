@@ -12,6 +12,26 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+// Which encoder to use.
+//
+// On Apple Silicon, VideoToolbox routes H.264 and HEVC through the dedicated
+// media engine rather than the CPU, which is dramatically faster and leaves
+// the cores free for the renderer — the CPU tier in particular is competing
+// for exactly those cores.
+//
+// It is not, however, bit-reproducible: hardware encoders make no such
+// guarantee across driver or silicon revisions, so a build that needs
+// byte-identical video must pin EncoderBackend::Software. (Note that the
+// software path is not reproducible today either — see the note in
+// docs/larimar/ARCHITECTURE.md §7 — but it is the one that can be made so.)
+enum class EncoderBackend {
+    Auto,     // Hardware when present, software otherwise.
+    Hardware, // Fail rather than silently fall back.
+    Software
+};
+
+enum class EncoderCodec { H264, HEVC };
+
 class SimpleEncoder {
     int width, height, fps, frame_idx;
     AVFormatContext *fmt_ctx = NULL;
@@ -38,35 +58,98 @@ class SimpleEncoder {
         }
     }
 
-public:
-    SimpleEncoder(const char* filename, int w, int h, int fps_val) 
-        : width(w), height(h), fps(fps_val), frame_idx(0) {
-       
-        avformat_alloc_output_context2(&fmt_ctx, NULL, NULL, filename);
-        if (!fmt_ctx) { fprintf(stderr, "Could not create output context\n"); exit(1); }
+    // The VideoToolbox encoders only exist in an Apple build of FFmpeg, so
+    // looking them up by name is enough — no platform #ifdef needed.
+    static const AVCodec* find_hardware(EncoderCodec codec) {
+        return avcodec_find_encoder_by_name(
+            codec == EncoderCodec::HEVC ? "hevc_videotoolbox" : "h264_videotoolbox");
+    }
 
-        
-        const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_H264);
-        if (codec) printf("Video Encoder: Selected %s (Software)\n", codec->name);
-        else { fprintf(stderr, "Error: H.264 encoder (libx264) not found.\n"); exit(1); }
+    static const AVCodec* find_software(EncoderCodec codec) {
+        return avcodec_find_encoder(
+            codec == EncoderCodec::HEVC ? AV_CODEC_ID_HEVC : AV_CODEC_ID_H264);
+    }
 
-        stream = avformat_new_stream(fmt_ctx, codec);
+    void configure_context(const AVCodec* codec) {
         c_ctx = avcodec_alloc_context3(codec);
         c_ctx->width = width; c_ctx->height = height;
 
         c_ctx->time_base = AVRational{1, fps};
         c_ctx->framerate = AVRational{fps, 1};
+        // VideoToolbox accepts yuv420p directly, so both paths share the
+        // existing RGBA -> YUV420P conversion.
         c_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-        
-        int64_t target_bitrate = (int64_t)width * height * fps * 0.25; 
+        // Stated rather than inferred. VideoToolbox warns when it has to guess
+        // and then assumes MPEG range anyway, so saying so keeps the two
+        // encoders explicitly agreed on how to interpret the same frames.
+        c_ctx->color_range = AVCOL_RANGE_MPEG;
+
+        int64_t target_bitrate = (int64_t)width * height * fps * 0.25;
         c_ctx->bit_rate = target_bitrate;
         c_ctx->rc_max_rate = target_bitrate * 1.5;
         c_ctx->rc_buffer_size = target_bitrate;
 
-        if (fmt_ctx->oformat->flags & AVFMT_GLOBALHEADER) 
+        if (fmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
             c_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
 
-        if (avcodec_open2(c_ctx, codec, NULL) < 0) { fprintf(stderr, "Could not open codec\n"); exit(1); }
+public:
+    SimpleEncoder(const char* filename, int w, int h, int fps_val,
+                  EncoderBackend backend = EncoderBackend::Auto,
+                  EncoderCodec codec_kind = EncoderCodec::H264)
+        : width(w), height(h), fps(fps_val), frame_idx(0) {
+       
+        avformat_alloc_output_context2(&fmt_ctx, NULL, NULL, filename);
+        if (!fmt_ctx) { fprintf(stderr, "Could not create output context\n"); exit(1); }
+
+        const char* codec_label = (codec_kind == EncoderCodec::HEVC) ? "HEVC" : "H.264";
+
+        const AVCodec* codec = NULL;
+        bool hardware = false;
+
+        if (backend != EncoderBackend::Software) {
+            codec = find_hardware(codec_kind);
+            hardware = (codec != NULL);
+            if (!codec && backend == EncoderBackend::Hardware) {
+                fprintf(stderr,
+                        "Error: hardware %s encoder (VideoToolbox) was requested but is "
+                        "not available in this FFmpeg build.\n", codec_label);
+                exit(1);
+            }
+        }
+        if (!codec) codec = find_software(codec_kind);
+        if (!codec) {
+            fprintf(stderr, "Error: no %s encoder available.\n", codec_label);
+            exit(1);
+        }
+
+        stream = avformat_new_stream(fmt_ctx, codec);
+        configure_context(codec);
+
+        if (avcodec_open2(c_ctx, codec, NULL) < 0) {
+            // Present but unusable — VideoToolbox can refuse a session under
+            // virtualization or an odd geometry. Under Auto that is a reason
+            // to encode on the CPU, not to fail the render; an explicit
+            // request still fails loudly.
+            if (hardware && backend == EncoderBackend::Auto) {
+                fprintf(stderr,
+                        "Note: hardware %s encoder unavailable at runtime, using software.\n",
+                        codec_label);
+                avcodec_free_context(&c_ctx);
+                codec = find_software(codec_kind);
+                hardware = false;
+                if (!codec) { fprintf(stderr, "Error: no software %s encoder.\n", codec_label); exit(1); }
+                configure_context(codec);
+                if (avcodec_open2(c_ctx, codec, NULL) < 0) {
+                    fprintf(stderr, "Could not open codec\n"); exit(1);
+                }
+            } else {
+                fprintf(stderr, "Could not open codec\n"); exit(1);
+            }
+        }
+
+        printf("Video Encoder: %s (%s)\n", codec->name,
+               hardware ? "Hardware / Apple media engine" : "Software");
 
         avcodec_parameters_from_context(stream->codecpar, c_ctx);
 

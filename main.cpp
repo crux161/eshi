@@ -130,6 +130,14 @@ int main(int argc, char** argv) {
     
     bool use_gpu = false;
     bool live_mode = false;
+    // Initialize the renderer, report which backend came up, and exit without
+    // rendering. CI needs to assert that a shader actually reached the GPU
+    // backend rather than silently falling back to the CPU, and timing a
+    // 240-frame render just to read one line of output is both slow and
+    // flaky.
+    bool validate_only = false;
+    EncoderBackend encoder_backend = EncoderBackend::Auto;
+    EncoderCodec   encoder_codec = EncoderCodec::H264;
     std::string output_name = "output.mp4";
 
     std::string bin_name = "eshi";
@@ -146,6 +154,15 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if(arg == "--gpu")  use_gpu = true;
         if(arg == "--live") live_mode = true;
+        if(arg == "--validate") validate_only = true;
+        if(arg == "--hevc") encoder_codec = EncoderCodec::HEVC;
+        if(arg == "--encoder" && i + 1 < argc) {
+            const std::string mode = argv[++i];
+            if (mode == "hw" || mode == "hardware") encoder_backend = EncoderBackend::Hardware;
+            else if (mode == "sw" || mode == "software") encoder_backend = EncoderBackend::Software;
+            else if (mode == "auto") encoder_backend = EncoderBackend::Auto;
+            else fprintf(stderr, "unknown --encoder mode '%s' (auto|hw|sw)\n", mode.c_str());
+        }
         if(arg == "--res") {
             if (i + 1 < argc) {
                 std::string res_str = argv[++i]; 
@@ -234,8 +251,16 @@ int main(int argc, char** argv) {
                         bin_name.c_str(), bin_name.c_str(), bin_name.c_str());
             } else {
                 printf("Initializing OpenGL Renderer with shader: %s\n", shader_path.c_str());
-                gl_renderer = new GlRenderer(W, H, shader_path.c_str(), texData, tw, th);
-                gpu_init = true;
+                try {
+                    gl_renderer = new GlRenderer(W, H, shader_path.c_str(), texData, tw, th);
+                    gpu_init = true;
+                } catch (const std::exception& error) {
+                    // Leaving gpu_init false drops through to the CPU renderer
+                    // below. A shader this backend cannot build is a reason to
+                    // render it more slowly, not a reason to produce black
+                    // frames or abort.
+                    fprintf(stderr, "[OpenGL ERROR] %s\n", error.what());
+                }
             }
         }
         #endif
@@ -270,7 +295,33 @@ int main(int argc, char** argv) {
     
     if (texData) stbi_image_free(texData);
 
-    if (live_mode) {
+    int exit_code = 0;
+
+    // cpu_renderer is allocated only when no GPU backend is active — either
+    // none was asked for, or the one that was asked for failed to build the
+    // shader and fell through. That makes it the authoritative answer to
+    // "did the GPU path work", which is exactly what --validate reports.
+    const bool gpu_active = (cpu_renderer == nullptr);
+
+    if (validate_only) {
+        const char* backend = "cpu";
+        #ifdef USE_CUDA
+        if (gpu_renderer) backend = "cuda";
+        #endif
+        #ifdef USE_OPENGL
+        if (gl_renderer) backend = "opengl";
+        #endif
+        #ifdef USE_METAL
+        if (metal_renderer) backend = "metal";
+        #endif
+
+        if (use_gpu && !gpu_active) {
+            printf("[validate] FAIL %s: requested GPU, fell back to CPU\n", bin_name.c_str());
+            exit_code = 1;
+        } else {
+            printf("[validate] ok %s: backend=%s\n", bin_name.c_str(), backend);
+        }
+    } else if (live_mode) {
         Display window(W, H, "Eshi Live Preview");
         auto start_time_clock = std::chrono::high_resolution_clock::now();
         
@@ -313,7 +364,7 @@ int main(int argc, char** argv) {
 
     } else {
         const int FRAMES = 240;
-        SimpleEncoder video(output_name.c_str(), W, H, FPS);
+        SimpleEncoder video(output_name.c_str(), W, H, FPS, encoder_backend, encoder_codec);
         
         for (int i = 0; i < FRAMES; ++i) {
             float time = (float)i / (float)FPS;
@@ -353,5 +404,5 @@ int main(int argc, char** argv) {
     
     SDL_Quit();
 
-    return 0;
+    return exit_code;
 }
