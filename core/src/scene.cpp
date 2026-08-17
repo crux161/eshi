@@ -145,8 +145,19 @@ int32_t insert_node(EshiWorld* w, EshiSceneState* scene, uint32_t key) {
     node.seen = scene->epoch;
 
     const int32_t index = (int32_t)scene->nodes.size();
-    scene->nodes.push_back(node);
-    scene->lookup[key] = index;
+    try {
+        scene->nodes.push_back(node);
+    } catch (...) {
+        eshi_entity_destroy(w, entity);
+        throw;
+    }
+    try {
+        scene->lookup[key] = index;
+    } catch (...) {
+        scene->nodes.pop_back();
+        eshi_entity_destroy(w, entity);
+        throw;
+    }
     return index;
 }
 
@@ -366,6 +377,7 @@ EshiResult decode(EshiWorld* w, EshiSceneState* scene,
 
         i += 1 + words_declared;
         ++applied;
+        if (out_applied) *out_applied = applied;
     }
 
     if (out_applied) *out_applied = applied;
@@ -394,11 +406,16 @@ extern "C" void eshi__scene_destroy(EshiSceneState* scene) { delete scene; }
  * ==========================================================================*/
 extern "C" EshiResult eshi_commands_reserve(EshiWorld* w, uint32_t words) {
     if (!w) return ESHI_ERR_INVALID;
+    if (words > ESHI_MAX_SHARED_BUFFER_WORDS) return ESHI_ERR_LIMIT;
     EshiSceneState* scene = scene_of(w);
     if (!scene) return ESHI_ERR_NOMEM;
     if (scene->commands.size() >= words) return ESHI_OK;
 
-    scene->commands.resize(words, 0u);
+    try {
+        scene->commands.resize(words, 0u);
+    } catch (...) {
+        return ESHI_ERR_NOMEM;
+    }
     return ESHI_OK;
 }
 
@@ -424,7 +441,11 @@ extern "C" EshiResult eshi_commands_submit(EshiWorld* w, const uint32_t* words,
 
     EshiSceneState* scene = scene_of(w);
     if (!scene) return ESHI_ERR_NOMEM;
-    return decode(w, scene, words, word_count, out_applied);
+    try {
+        return decode(w, scene, words, word_count, out_applied);
+    } catch (...) {
+        return ESHI_ERR_NOMEM;
+    }
 }
 
 extern "C" EshiResult eshi_commands_flush(EshiWorld* w, uint32_t word_count,
@@ -437,7 +458,11 @@ extern "C" EshiResult eshi_commands_flush(EshiWorld* w, uint32_t word_count,
     if (word_count > scene->commands.size()) return ESHI_ERR_LIMIT;
     if (word_count == 0) return ESHI_OK;
 
-    return decode(w, scene, &scene->commands[0], word_count, out_applied);
+    try {
+        return decode(w, scene, &scene->commands[0], word_count, out_applied);
+    } catch (...) {
+        return ESHI_ERR_NOMEM;
+    }
 }
 
 /* ===========================================================================
@@ -485,9 +510,16 @@ extern "C" void eshi_scene_clear(EshiWorld* w) {
  * ==========================================================================*/
 extern "C" EshiResult eshi_events_reserve(EshiWorld* w, uint32_t words) {
     if (!w) return ESHI_ERR_INVALID;
+    if (words > ESHI_MAX_SHARED_BUFFER_WORDS) return ESHI_ERR_LIMIT;
     EshiSceneState* scene = scene_of(w);
     if (!scene) return ESHI_ERR_NOMEM;
-    if (scene->events.size() < words) scene->events.resize(words, 0u);
+    if (scene->events.size() < words) {
+        try {
+            scene->events.resize(words, 0u);
+        } catch (...) {
+            return ESHI_ERR_NOMEM;
+        }
+    }
     return ESHI_OK;
 }
 

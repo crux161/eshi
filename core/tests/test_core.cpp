@@ -10,7 +10,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
+#include <vector>
 
 #include <eshi/eshi.h>
 #include <eshi/scene.hpp>
@@ -409,6 +411,124 @@ void describe(eshi::SceneWriter& scene, uint32_t epoch, float paddle_y, bool wit
     scene.end();
 }
 
+bool read_hex_fixture(const char* path, std::vector<uint8_t>* out) {
+    std::ifstream input(path);
+    std::string token;
+    out->clear();
+    if (!input) return false;
+
+    while (input >> token) {
+        unsigned int byte = 0;
+        char trailing = '\0';
+        if (std::sscanf(token.c_str(), "%x%c", &byte, &trailing) != 1 || byte > 0xFFu) {
+            out->clear();
+            return false;
+        }
+        out->push_back((uint8_t)byte);
+    }
+    return !out->empty();
+}
+
+std::vector<uint8_t> words_as_little_endian(const uint32_t* words, uint32_t count) {
+    std::vector<uint8_t> bytes;
+    bytes.reserve((size_t)count * 4u);
+    for (uint32_t i = 0; i < count; ++i) {
+        bytes.push_back((uint8_t)(words[i] & 0xFFu));
+        bytes.push_back((uint8_t)((words[i] >> 8) & 0xFFu));
+        bytes.push_back((uint8_t)((words[i] >> 16) & 0xFFu));
+        bytes.push_back((uint8_t)((words[i] >> 24) & 0xFFu));
+    }
+    return bytes;
+}
+
+std::vector<uint32_t> little_endian_words(const std::vector<uint8_t>& bytes) {
+    std::vector<uint32_t> words;
+    if (bytes.size() % 4u != 0) return words;
+    words.reserve(bytes.size() / 4u);
+    for (size_t i = 0; i < bytes.size(); i += 4) {
+        words.push_back((uint32_t)bytes[i] |
+                        ((uint32_t)bytes[i + 1] << 8) |
+                        ((uint32_t)bytes[i + 2] << 16) |
+                        ((uint32_t)bytes[i + 3] << 24));
+    }
+    return words;
+}
+
+void test_golden_wire_corpus() {
+    std::printf("golden wire corpus\n");
+
+    std::vector<uint8_t> command_golden;
+    check(read_hex_fixture("core/tests/fixtures/commands_v1.hex", &command_golden),
+          "the shared command byte fixture is readable");
+
+    uint32_t encoded[64];
+    eshi::SceneWriter writer(encoded, 64);
+    writer.nop()
+        .begin(42)
+        .node(7)
+        .transform(1.5f, -2.25f)
+        .velocity(0.25f, -0.5f)
+        .collider(0.5f, 0.25f, 1u, 2u, ESHI_COLLIDER_STATIC)
+        .restitution(0.75f)
+        .bounds(-3.0f, 3.0f, -4.0f, 4.0f)
+        .end()
+        .input(ESHI_KEY_SPACE, true);
+    check(!writer.overflowed(), "the v1 command corpus fits its encoder buffer");
+    check(words_as_little_endian(encoded, writer.size()) == command_golden,
+          "the C++ encoder produces the shared command bytes exactly");
+
+    const std::vector<uint32_t> command_words = little_endian_words(command_golden);
+    check(!command_words.empty(), "the command fixture contains whole u32 words");
+    EshiWorld* command_world = make_world();
+    uint32_t applied = 0;
+    if (!command_words.empty()) {
+        check(eshi_commands_submit(command_world, &command_words[0],
+                                   (uint32_t)command_words.size(), &applied) == ESHI_OK,
+              "the native decoder accepts the shared command fixture");
+    }
+    check(applied == 10, "every golden command was applied");
+    check(eshi_scene_epoch(command_world) == 42, "the golden epoch round-trips");
+    check(eshi_scene_entity(command_world, 7) != ESHI_NULL_ENTITY,
+          "the golden node key round-trips");
+    check(eshi_input_down(command_world, ESHI_KEY_SPACE) == 1,
+          "the golden input command round-trips");
+    float x = 0.0f, y = 0.0f;
+    eshi_transform_get(command_world, eshi_scene_entity(command_world, 7), &x, &y);
+    check(x == 1.5f && y == -2.25f, "golden IEEE-754 transform words round-trip");
+    eshi_world_destroy(command_world);
+
+    std::vector<uint8_t> event_golden;
+    check(read_hex_fixture("core/tests/fixtures/events_v1.hex", &event_golden),
+          "the shared event byte fixture is readable");
+
+    EshiWorld* event_world = make_world();
+    const EshiEntity a = eshi_entity_create(event_world);
+    const EshiEntity b = eshi_entity_create(event_world);
+    eshi_transform_set(event_world, a, -0.25f, 0.0f);
+    eshi_transform_set(event_world, b, 0.25f, 0.0f);
+    eshi_collider_set(event_world, a, 0.5f, 0.5f, 1u, 1u, ESHI_COLLIDER_STATIC);
+    eshi_collider_set(event_world, b, 0.5f, 0.5f, 1u, 1u, ESHI_COLLIDER_STATIC);
+    eshi_tick(event_world, 1.0f / 60.0f);
+    eshi_events_reserve(event_world, 6);
+    uint32_t event_words_written = 0;
+    check(eshi_events_pack(event_world, &event_words_written) == ESHI_OK,
+          "the golden collision packs");
+    check(words_as_little_endian(eshi_events_data(event_world), event_words_written) ==
+              event_golden,
+          "the native event encoder produces the shared event bytes exactly");
+    eshi_world_destroy(event_world);
+
+    const std::vector<uint32_t> event_words = little_endian_words(event_golden);
+    EshiCollisionEvent event;
+    eshi::EventReader reader(event_words.empty() ? NULL : &event_words[0],
+                             (uint32_t)event_words.size());
+    check(reader.next_collision(&event), "the C++ decoder accepts the shared event fixture");
+    check(event.a == 1 && event.b == 2, "golden collision entities round-trip");
+    check(event.nx == -1.0f && event.ny == 0.0f && event.penetration == 0.5f,
+          "golden collision floats round-trip");
+    check(!reader.next_collision(&event), "the golden event stream ends on a record boundary");
+}
+
 void test_command_wire_format() {
     std::printf("command wire format\n");
     EshiWorld* w = make_world();
@@ -416,6 +536,8 @@ void test_command_wire_format() {
     const uint32_t header = ESHI_CMD_HEADER(ESHI_CMD_COLLIDER, 5);
     check(ESHI_CMD_OP(header) == (uint32_t)ESHI_CMD_COLLIDER, "opcode survives the header pack");
     check(ESHI_CMD_WORDS(header) == 5, "payload length survives the header pack");
+    check(ESHI_CMD_WORDS(ESHI_CMD_HEADER(1, 0x1FFFFu)) == ESHI_MAX_WIRE_PAYLOAD_WORDS,
+          "header packing cannot corrupt the opcode with an oversized length");
 
     uint32_t applied = 0;
 
@@ -453,7 +575,66 @@ void test_command_wire_format() {
     check(eshi_commands_submit(w, orphan, 3, &applied) == ESHI_ERR_INVALID,
           "a component with no open node is rejected");
 
+    check(eshi_commands_submit(w, NULL, 1, &applied) == ESHI_ERR_INVALID,
+          "non-empty submissions require storage");
+    check(eshi_commands_submit(w, NULL, 0, &applied) == ESHI_OK,
+          "an empty submission does not require storage");
+
+    const uint32_t invalid_input[3] = {
+        ESHI_CMD_HEADER(ESHI_CMD_INPUT, 2), (uint32_t)ESHI_KEY_COUNT, 1u
+    };
+    check(eshi_commands_submit(w, invalid_input, 3, &applied) == ESHI_ERR_INVALID,
+          "out-of-range input keys are rejected");
+
     eshi_world_destroy(w);
+}
+
+void test_boundary_capacity_and_lifecycle() {
+    std::printf("boundary capacity and lifecycle\n");
+    check(eshi_commands_reserve(NULL, 1) == ESHI_ERR_INVALID,
+          "a command buffer needs a live world");
+    check(eshi_events_reserve(NULL, 1) == ESHI_ERR_INVALID,
+          "an event buffer needs a live world");
+    check(eshi_commands_data(NULL) == NULL && eshi_commands_capacity(NULL) == 0,
+          "null command buffer queries are inert");
+    check(eshi_events_data(NULL) == NULL && eshi_events_capacity(NULL) == 0,
+          "null event buffer queries are inert");
+    eshi_world_destroy(NULL);
+
+    EshiWorld* w = make_world();
+    check(eshi_commands_reserve(w, ESHI_MAX_SHARED_BUFFER_WORDS + 1u) == ESHI_ERR_LIMIT,
+          "command storage has a deterministic hard limit");
+    check(eshi_events_reserve(w, ESHI_MAX_SHARED_BUFFER_WORDS + 1u) == ESHI_ERR_LIMIT,
+          "event storage has a deterministic hard limit");
+    check(eshi_commands_capacity(w) == 0 && eshi_events_capacity(w) == 0,
+          "rejected capacity requests allocate nothing");
+
+    uint32_t tiny[2];
+    eshi::SceneWriter partial(tiny, 2);
+    partial.begin(9).node(1);
+    check(partial.overflowed(), "the writer latches insufficient capacity");
+    check(partial.size() == 2, "the writer never emits a partial command");
+    check(partial.submit(w) == ESHI_ERR_LIMIT,
+          "an overflowed writer cannot submit its prefix accidentally");
+    check(eshi_scene_epoch(w) == 0, "an overflowed writer changes no scene state");
+
+    eshi::SceneWriter null_writer(NULL, 1);
+    null_writer.nop();
+    check(null_writer.overflowed(), "a null encoder destination is rejected");
+
+    EshiCollisionEvent event;
+    eshi::EventReader null_reader(NULL, 1);
+    check(!null_reader.next_collision(&event), "a null event stream is rejected");
+    const uint32_t truncated_event[1] = { ESHI_CMD_HEADER(ESHI_EVENT_COLLISION, 5) };
+    eshi::EventReader truncated_reader(truncated_event, 1);
+    check(!truncated_reader.next_collision(&event), "a truncated event record is rejected");
+    eshi_world_destroy(w);
+
+    for (int i = 0; i < 64; ++i) {
+        EshiWorld* cycle = make_world();
+        check(cycle != NULL, "world lifecycle can be repeated");
+        eshi_world_destroy(cycle);
+    }
 }
 
 void test_shared_command_buffer() {
@@ -753,6 +934,20 @@ void test_event_buffer() {
     check(eshi_events_pack(small, &written) == ESHI_ERR_LIMIT, "overflow is reported");
     check(written == 6, "and reports the whole records that did fit");
 
+    EshiWorld* tiny = make_world();
+    for (int i = 0; i < 2; ++i) {
+        EshiEntity e = eshi_entity_create(tiny);
+        eshi_transform_set(tiny, e, 0.05f * (float)i, 0.0f);
+        eshi_collider_set(tiny, e, 0.5f, 0.5f, kLayer, kLayer, ESHI_COLLIDER_STATIC);
+    }
+    eshi_tick(tiny, 1.0f / 60.0f);
+    eshi_events_reserve(tiny, 5);
+    written = 123;
+    check(eshi_events_pack(tiny, &written) == ESHI_ERR_LIMIT,
+          "an undersized event buffer reports overflow");
+    check(written == 0, "an undersized event buffer writes no partial record");
+
+    eshi_world_destroy(tiny);
     eshi_world_destroy(small);
     eshi_world_destroy(w);
 }
@@ -774,7 +969,9 @@ int main() {
     test_system_ordering();
     test_input_edges();
 
+    test_golden_wire_corpus();
     test_command_wire_format();
+    test_boundary_capacity_and_lifecycle();
     test_shared_command_buffer();
     test_scene_reconcile();
     test_scene_reload_does_not_duplicate();

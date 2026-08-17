@@ -100,20 +100,22 @@ maintained `@v2` action while retaining the project's tested Zig 0.16.0 pin.
 Gate met: core, OpenGL, and Metal jobs all execute project code and pass, and
 GitHub will not update the RC integration branch unless those checks are green.
 
-### Step 2 — Freeze the native contract
+### Step 2 — Freeze the native contract — **complete**
 
 Dependency: Step 1.
 
-- Add an ABI/version query and reject incompatible Dart/native pairs early.
-- Audit `eshi.h` for C99 portability, struct sizes/alignment, error propagation,
-  thread affinity, and create/destroy symmetry.
-- Turn the packed command and event formats into a versioned specification with
-  golden byte fixtures shared by C++ and Dart.
-- Add malformed-buffer, stale-epoch, capacity, and lifecycle tests plus ASan/
-  UBSan coverage on Linux.
+- [x] Add an ABI/version query and reject incompatible Dart/native pairs early.
+- [x] Audit `eshi.h` for C99 portability, struct sizes/alignment, error
+      propagation, thread affinity, and create/destroy symmetry.
+- [x] Turn the packed command and event formats into a versioned specification
+      with golden byte fixtures shared by C++ and Dart.
+- [x] Add malformed-buffer, stale-epoch, capacity, and lifecycle tests plus
+      ASan/UBSan coverage on Linux.
 
-Gate: an ABI test loads the release library, validates every public layout, and
-round-trips the golden command/event corpus with no sanitizer findings.
+Gate met: `zig build abi-test` dynamically loads the release-mode library and
+validates every public layout (187 checks); the core round-trips both golden
+streams and hostile inputs (238 checks), and `zig build test-sanitize` reports
+no ASan/UBSan findings.
 
 ### Step 3 — Create the Dart/Flutter package
 
