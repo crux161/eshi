@@ -212,6 +212,16 @@ class GlRenderer {
             // glsl::length(...) failed to compile here while working on Metal.
             line = replaceAll(line, "glsl::", "");
             line = replaceAll(line, "sumi::", "");
+            // The target already provides scalar and vector tanh overloads.
+            // Keeping tzozen.cpp's CPU-side vec4 overload under the same name
+            // hides Mesa's scalar built-ins inside its own body, so tanh(v.x)
+            // has only the vec4 candidate and the shader is rejected. Rename
+            // the compatibility helper and let GLSL's native overload set own
+            // calls in generated shader code.
+            line = std::regex_replace(
+                line,
+                std::regex("SHADER_CTX\\s+vec4\\s+tanh\\(vec4\\s+v\\)\\s*\\{"),
+                "vec4 __eshi_unused_tanh(vec4 v) {");
             // Any surviving `::` is the global-scope qualifier —
             // tunnelwisp.cpp calls ::tanhf to reach libc past libsumi's
             // overload. GLSL has no scope resolution and no single `:` is

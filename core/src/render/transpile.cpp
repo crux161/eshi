@@ -79,6 +79,16 @@ std::string common_rules(std::string line) {
     line = replace_all(line, "inline ", "");
     line = replace_all(line, "glsl::", "");
     line = replace_all(line, "sumi::", "");
+    /*
+     * Both targets already provide scalar and vector tanh overloads. A
+     * CPU-side vec4 compatibility overload under that same name redeclares the
+     * MSL builtin and, on Mesa GLSL, hides the scalar overloads inside its own
+     * body. Rename the helper and let the target's native overload set service
+     * generated shader calls.
+     */
+    line = std::regex_replace(
+        line, std::regex("SHADER_CTX\\s+vec4\\s+tanh\\(vec4\\s+v\\)\\s*\\{"),
+        "vec4 __eshi_unused_tanh(vec4 v) {");
     line = replace_all(line, "if (iChannel0.data == nullptr)", "if (false)");
     /*
      * Any surviving `::` is the global-scope qualifier — tunnelwisp.cpp calls
@@ -196,12 +206,6 @@ std::string msl_rules(std::string line, int uniform_floats) {
     line = replace_all(line, "vec3 &", "thread vec3& ");
     line = replace_all(line, "vec4&", "thread vec4&");
     line = replace_all(line, "vec4 &", "thread vec4& ");
-
-    /* MSL has tanh natively; a shader that defines its own would collide. */
-    line = std::regex_replace(
-        line, std::regex("SHADER_CTX\\s+vec4\\s+tanh\\(vec4\\s+v\\)\\s*\\{"),
-        "vec4 __eshi_unused_tanh(vec4 v) {");
-    line = replace_all(line, "::tanhf", "tanh");
 
     line = replace_all(line, "texture(iChannel0,", "iChannel0.sample(smp,");
     line = replace_all(line, "texture(::iChannel0,", "iChannel0.sample(smp,");

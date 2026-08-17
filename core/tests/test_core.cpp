@@ -10,9 +10,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include <eshi/eshi.h>
 #include <eshi/scene.hpp>
+
+#include "../src/render/transpile.h"
 
 namespace {
 
@@ -110,6 +113,28 @@ void test_material_and_render() {
     check(pixels[0] == 0, "uniform block is re-read each frame");
 
     eshi_world_destroy(w);
+}
+
+void test_shader_transpile_builtin_overloads() {
+    std::printf("shader builtin overloads\n");
+
+    std::string glsl;
+    std::string error;
+    check(eshi::transpile::build_program(
+              "examples/tzozen.cpp", eshi::transpile::kTargetGlsl, 0, &glsl, &error),
+          "tzozen transpiles to GLSL");
+    check(glsl.find("vec4 __eshi_unused_tanh(vec4 v)") != std::string::npos,
+          "CPU tanh helper is renamed for GLSL");
+    check(glsl.find("vec4 tanh(vec4 v)") == std::string::npos,
+          "CPU tanh helper cannot shadow GLSL builtins");
+
+    std::string msl;
+    error.clear();
+    check(eshi::transpile::build_program(
+              "examples/tzozen.cpp", eshi::transpile::kTargetMsl, 0, &msl, &error),
+          "tzozen transpiles to MSL");
+    check(msl.find("vec4 __eshi_unused_tanh(vec4 v)") != std::string::npos,
+          "CPU tanh helper is renamed for MSL");
 }
 
 void test_entity_generations() {
@@ -739,6 +764,7 @@ int main() {
 
     test_grade_gate();
     test_material_and_render();
+    test_shader_transpile_builtin_overloads();
     test_entity_generations();
     test_sparse_set_removal();
     test_motion_and_bounds();
