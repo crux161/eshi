@@ -1,0 +1,24 @@
+name: larimar
+description: Dart and Flutter FFI bindings for the Larimar game engine core.
+version: 0.1.0-dev.1
+publish_to: none
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+
+dependencies:
+  code_assets: ^1.1.0
+  ffi: ^2.2.0
+  hooks: ^2.0.0
+  logging: ^1.3.0
+  native_toolchain_c: ^0.19.0
+
+dev_dependencies:
+  ffigen: ^21.0.0
+  lints: ^6.0.0
+  test: ^1.25.8
+
+topics:
+  - ffi
+  - flutter
+  - game-engine
