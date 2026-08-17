@@ -13,7 +13,7 @@ IOSurface-backed Flutter textures for the Larimar game engine.
   s.public_header_files = 'larimar/Sources/larimar/include/**/*.h'
   s.header_mappings_dir = 'larimar/Sources/larimar/include'
   s.dependency 'FlutterMacOS'
-  s.platform         = :osx, '12.0'
+  s.platform         = :osx, '10.15'
   s.frameworks       = 'CoreVideo', 'Metal', 'IOSurface'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
