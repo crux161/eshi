@@ -42,6 +42,8 @@ class SceneWriter {
     SceneWriter(uint32_t* words, uint32_t capacity)
         : words_(words), capacity_(capacity), size_(0), overflowed_(false) {}
 
+    SceneWriter& nop() { return emit(ESHI_CMD_NOP, NULL, 0); }
+
     SceneWriter& begin(uint32_t epoch) {
         uint32_t p[1] = { epoch };
         return emit(ESHI_CMD_SCENE_BEGIN, p, 1);
@@ -102,7 +104,8 @@ class SceneWriter {
     }
 
     SceneWriter& emit(EshiCommand op, const uint32_t* payload, uint32_t count) {
-        if (overflowed_ || size_ + 1 + count > capacity_) {
+        if (overflowed_ || !words_ || size_ >= capacity_ ||
+            count > capacity_ - size_ - 1) {
             overflowed_ = true;
             return *this;
         }
@@ -125,6 +128,7 @@ class EventReader {
 
     /** Advances to the next collision, or returns false at the end. */
     bool next_collision(EshiCollisionEvent* out) {
+        if (!words_ || !out) return false;
         while (cursor_ + 1 <= count_) {
             const uint32_t header = words_[cursor_];
             const uint32_t payload = ESHI_CMD_WORDS(header);

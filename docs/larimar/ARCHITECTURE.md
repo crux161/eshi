@@ -6,6 +6,8 @@
 > unedited. This document is the continuation of that proposal with the Gyosho
 > monorepo (S2L / SumiC / Hanga) factored in, and it states plainly where the
 > original phases need to change.
+> The frozen host boundary is specified separately in
+> [NATIVE_CONTRACT.md](NATIVE_CONTRACT.md) and [WIRE_FORMAT.md](WIRE_FORMAT.md).
 
 ---
 

@@ -13,6 +13,7 @@
  */
 #include <cstddef>
 #include <cstdint>
+#include <new>
 
 #include "../eshi_internal.h"
 
@@ -31,7 +32,8 @@ int ink_available(void) { return 1; }
 
 EshiBackend* ink_create(int32_t width, int32_t height,
                         const char* /*source_path*/, const char* /*package_path*/) {
-    InkBackend* backend = new InkBackend();
+    InkBackend* backend = new (std::nothrow) InkBackend();
+    if (!backend) return NULL;
     backend->width = width;
     backend->height = height;
     return reinterpret_cast<EshiBackend*>(backend);

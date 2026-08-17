@@ -31,6 +31,7 @@ struct SparseIndex {
 
     void reserve(uint32_t max_entities) {
         entity_to_slot.assign(max_entities + 1, kNoSlot);
+        slot_to_entity.reserve(max_entities);
     }
 
     int32_t slot_of(EshiEntity e) const {
@@ -351,6 +352,7 @@ extern "C" const char* eshi_result_string(EshiResult r) {
         case ESHI_ERR_NOMEM:       return "out of memory";
         case ESHI_ERR_LIMIT:       return "capacity exhausted";
         case ESHI_ERR_STALE:       return "scene older than the world's epoch";
+        case ESHI_ERR_VERSION:     return "incompatible native or packed-protocol version";
     }
     return "unknown";
 }
@@ -397,33 +399,55 @@ extern "C" EshiWorld* eshi_world_create(const EshiConfig* in_cfg) {
     EshiWorld* w = new (std::nothrow) EshiWorld();
     if (!w) return NULL;
 
-    w->backend_vtable = vtable;
-    w->backend = NULL;
-    w->scene = NULL;
+    try {
+        w->backend_vtable = vtable;
+        w->backend = NULL;
+        w->scene = NULL;
 
-    w->cfg = cfg;
-    w->generation.assign(cfg.max_entities + 1, 0);
-    w->next_index = 1; /* index 0 is reserved so ESHI_NULL_ENTITY stays invalid */
-    w->live_count = 0;
+        w->cfg = cfg;
+        w->generation.assign(cfg.max_entities + 1, 0);
+        w->free_indices.reserve(cfg.max_entities);
+        w->next_index = 1; /* index 0 is reserved so ESHI_NULL_ENTITY stays invalid */
+        w->live_count = 0;
 
-    w->transforms.index.reserve(cfg.max_entities);
-    w->velocities.index.reserve(cfg.max_entities);
-    w->colliders.index.reserve(cfg.max_entities);
-    w->bounds.index.reserve(cfg.max_entities);
+        w->transforms.index.reserve(cfg.max_entities);
+        w->transforms.x.reserve(cfg.max_entities);
+        w->transforms.y.reserve(cfg.max_entities);
+        w->velocities.index.reserve(cfg.max_entities);
+        w->velocities.vx.reserve(cfg.max_entities);
+        w->velocities.vy.reserve(cfg.max_entities);
+        w->colliders.index.reserve(cfg.max_entities);
+        w->colliders.hx.reserve(cfg.max_entities);
+        w->colliders.hy.reserve(cfg.max_entities);
+        w->colliders.layer.reserve(cfg.max_entities);
+        w->colliders.mask.reserve(cfg.max_entities);
+        w->colliders.flags.reserve(cfg.max_entities);
+        w->colliders.restitution.reserve(cfg.max_entities);
+        w->bounds.index.reserve(cfg.max_entities);
+        w->bounds.min_x.reserve(cfg.max_entities);
+        w->bounds.max_x.reserve(cfg.max_entities);
+        w->bounds.min_y.reserve(cfg.max_entities);
+        w->bounds.max_y.reserve(cfg.max_entities);
+        w->collisions.reserve(cfg.max_entities);
+        w->systems.reserve(16);
 
-    w->system_sequence = 0;
-    std::memset(w->keys, 0, sizeof(w->keys));
-    std::memset(w->keys_prev, 0, sizeof(w->keys_prev));
+        w->system_sequence = 0;
+        std::memset(w->keys, 0, sizeof(w->keys));
+        std::memset(w->keys_prev, 0, sizeof(w->keys_prev));
 
-    std::memset(&w->material, 0, sizeof(w->material));
-    w->accumulator = 0.0f;
-    w->frame = 0;
-    w->sim_time = 0.0;
-    w->rng_state = cfg.seed ? cfg.seed : 0x5EED5EEDull;
+        std::memset(&w->material, 0, sizeof(w->material));
+        w->accumulator = 0.0f;
+        w->frame = 0;
+        w->sim_time = 0.0;
+        w->rng_state = cfg.seed ? cfg.seed : 0x5EED5EEDull;
 
-    insert_system(w, "motion",    ESHI_ORDER_MOTION,        system_motion,    NULL);
-    insert_system(w, "bounds",    ESHI_ORDER_MOTION + 1,    system_bounds,    NULL);
-    insert_system(w, "collision", ESHI_ORDER_COLLISION,     system_collision, NULL);
+        insert_system(w, "motion",    ESHI_ORDER_MOTION,        system_motion,    NULL);
+        insert_system(w, "bounds",    ESHI_ORDER_MOTION + 1,    system_bounds,    NULL);
+        insert_system(w, "collision", ESHI_ORDER_COLLISION,     system_collision, NULL);
+    } catch (...) {
+        delete w;
+        return NULL;
+    }
 
     return w;
 }
@@ -651,7 +675,11 @@ extern "C" EshiVelocityView eshi_view_velocities(EshiWorld* w) {
 extern "C" EshiResult eshi_system_add(EshiWorld* w, const char* name, int32_t order,
                                       EshiSystemFn fn, void* user) {
     if (!w || !fn) return ESHI_ERR_INVALID;
-    insert_system(w, name, order, fn, user);
+    try {
+        insert_system(w, name, order, fn, user);
+    } catch (...) {
+        return ESHI_ERR_NOMEM;
+    }
     return ESHI_OK;
 }
 
@@ -711,9 +739,13 @@ extern "C" EshiResult eshi_material_set(EshiWorld* w, const EshiMaterial* materi
         w->backend = NULL;
     }
 
-    EshiBackend* backend =
-        w->backend_vtable->create(w->cfg.width, w->cfg.height,
-                                  material->source_path, material->package_path);
+    EshiBackend* backend = NULL;
+    try {
+        backend = w->backend_vtable->create(w->cfg.width, w->cfg.height,
+                                            material->source_path, material->package_path);
+    } catch (...) {
+        return ESHI_ERR_NOMEM;
+    }
     if (!backend) return ESHI_ERR_UNSUPPORTED;
 
     w->backend = backend;
@@ -724,10 +756,16 @@ extern "C" EshiResult eshi_material_set(EshiWorld* w, const EshiMaterial* materi
 extern "C" EshiResult eshi_render(EshiWorld* w, uint8_t* pixels, int32_t stride, float time) {
     if (!w || !pixels || stride <= 0) return ESHI_ERR_INVALID;
     if (!w->backend) return ESHI_ERR_INVALID;
-    return w->backend_vtable->render(w->backend, pixels, stride, time,
-                                     w->material.cpu_shader,
-                                     w->material.uniform_data,
-                                     w->material.uniform_size);
+    try {
+        return w->backend_vtable->render(w->backend, pixels, stride, time,
+                                         w->material.cpu_shader,
+                                         w->material.uniform_data,
+                                         w->material.uniform_size);
+    } catch (const std::bad_alloc&) {
+        return ESHI_ERR_NOMEM;
+    } catch (...) {
+        return ESHI_ERR_INVALID;
+    }
 }
 
 /* ===========================================================================
@@ -736,28 +774,36 @@ extern "C" EshiResult eshi_render(EshiWorld* w, uint8_t* pixels, int32_t stride,
 extern "C" void eshi_tick(EshiWorld* w, float dt) {
     if (!w) return;
 
-    w->accumulator += dt;
+    try {
+        w->accumulator += dt;
 
-    /*
-     * Clamp the number of catch-up steps. A stalled host must not be able to
-     * turn one late frame into an unbounded simulation burst.
-     */
-    int steps = 0;
-    const int kMaxSteps = 8;
-    while (w->accumulator >= w->cfg.fixed_dt && steps < kMaxSteps) {
-        std::memcpy(w->keys_prev, w->keys, sizeof(w->keys));
+        /*
+         * Clamp the number of catch-up steps. A stalled host must not be able to
+         * turn one late frame into an unbounded simulation burst.
+         */
+        int steps = 0;
+        const int kMaxSteps = 8;
+        while (w->accumulator >= w->cfg.fixed_dt && steps < kMaxSteps) {
+            std::memcpy(w->keys_prev, w->keys, sizeof(w->keys));
 
-        for (size_t i = 0; i < w->systems.size(); ++i) {
-            w->systems[i].fn(w, w->cfg.fixed_dt, w->systems[i].user);
+            for (size_t i = 0; i < w->systems.size(); ++i) {
+                w->systems[i].fn(w, w->cfg.fixed_dt, w->systems[i].user);
+            }
+
+            w->accumulator -= w->cfg.fixed_dt;
+            w->sim_time += (double)w->cfg.fixed_dt;
+            w->frame++;
+            steps++;
         }
 
-        w->accumulator -= w->cfg.fixed_dt;
-        w->sim_time += (double)w->cfg.fixed_dt;
-        w->frame++;
-        steps++;
+        if (steps == kMaxSteps) w->accumulator = 0.0f;
+    } catch (...) {
+        /* The legacy void signature cannot report a system/allocation failure.
+         * Contain it at the C boundary and discard catch-up work; result-bearing
+         * APIs translate allocation failures to ESHI_ERR_NOMEM instead. */
+        w->accumulator = 0.0f;
+        w->collisions.clear();
     }
-
-    if (steps == kMaxSteps) w->accumulator = 0.0f;
 }
 
 extern "C" uint64_t eshi_frame_index(const EshiWorld* w) { return w ? w->frame : 0; }

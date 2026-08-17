@@ -172,6 +172,7 @@ pub fn build(b: *std.Build) void {
     test_module.addIncludePath(b.path("core/include"));
     test_module.addCSourceFiles(.{
         .files = &.{
+            "core/src/abi.cpp",
             "core/src/world.cpp",
             "core/src/scene.cpp",
             "core/src/render/registry.cpp",
@@ -192,6 +193,14 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(core_tests);
     const test_step = b.step("test", "Run the Larimar core tests");
     test_step.dependOn(&run_tests.step);
+
+    const abi_test_command = b.addSystemCommand(&.{"./scripts/test_abi.sh"});
+    const abi_test_step = b.step("abi-test", "Load and validate the Larimar release C ABI");
+    abi_test_step.dependOn(&abi_test_command.step);
+
+    const sanitized_test_command = b.addSystemCommand(&.{"./scripts/test_core_sanitized.sh"});
+    const sanitized_test_step = b.step("test-sanitize", "Run core tests under ASan and UBSan");
+    sanitized_test_step.dependOn(&sanitized_test_command.step);
 
     const main_install = addEshiExecutable(b, .{
         .name = "eshi",
@@ -391,6 +400,7 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
 
     module.addCSourceFiles(.{
         .files = &.{
+            "core/src/abi.cpp",
             "core/src/world.cpp",
             "core/src/scene.cpp",
             "core/src/render/registry.cpp",
