@@ -69,9 +69,23 @@ synchronously from `eshi_tick()` on the calling/world thread.
 
 The result-string and grade-probe functions do not use a world. The OpenGL proc
 loader is process-global: install it before creating Paper-grade worlds and do
-not replace it while such a world is in use. The future Flutter host must marshal
-view resize, render, and disposal to its render thread; it must not call through
-a stale Dart isolate after disposal.
+not replace it while such a world is in use.
+
+On macOS, `EshiView` treats the creating Dart isolate as the render-submission
+thread. Its ticker updates the world and calls the private Metal target entry
+point synchronously on that isolate. Texture registration, resize,
+frame-available, suspend/resume, and disposal are serialized through the
+platform channel, whose handler runs on Flutter's platform thread. Flutter's
+raster thread never calls the core; it only calls `copyPixelBuffer` under the
+adapter's surface lock.
+
+Each view owns its Flutter texture ID, IOSurface-backed `CVPixelBuffer`, and
+borrowed `id<MTLTexture>`. Resize atomically swaps that pair. The raster thread
+receives an owning pixel-buffer reference, so it may finish consuming the old
+surface after a resize. A synchronous Metal submission must finish before the
+host announces the frame, and no world or borrowed texture handle may be used
+after view/world disposal. Independent views may share a world only when their
+frame submissions are serialized on that world's owner isolate.
 
 ## Errors and capacity
 

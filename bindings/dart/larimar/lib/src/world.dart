@@ -84,6 +84,7 @@ final class LarimarWorld {
   final Isolate _ownerIsolate;
   LarimarCommandBuffer? _commandBuffer;
   LarimarEventBuffer? _eventBuffer;
+  LarimarMaterialBuffer? _materialBuffer;
   int _nextEpoch = 1;
   bool _disposed = false;
 
@@ -146,6 +147,103 @@ final class LarimarWorld {
 
   void clearScene() => native.eshi_scene_clear(_requirePointer());
 
+  /// Binds a runtime-transpiled GPU material and returns its live uniform block.
+  ///
+  /// [sourcePath] must remain readable when this call is made. Larimar copies
+  /// the path and owns the uniform allocation until this world is disposed or
+  /// another material replaces it.
+  LarimarMaterialBuffer bindShaderMaterial({
+    required String sourcePath,
+    required int uniformFloatCount,
+  }) {
+    final pointer = _requirePointer();
+    if (sourcePath.isEmpty) {
+      throw ArgumentError.value(sourcePath, 'sourcePath', 'must not be empty');
+    }
+    RangeError.checkValueInInterval(
+      uniformFloatCount,
+      0,
+      64,
+      'uniformFloatCount',
+    );
+    final source = sourcePath.toNativeUtf8();
+    final allocationCount = uniformFloatCount == 0 ? 1 : uniformFloatCount;
+    final uniforms = calloc<ffi.Float>(allocationCount);
+    final buffer = LarimarMaterialBuffer._(
+      this,
+      source,
+      uniforms,
+      uniforms.asTypedList(uniformFloatCount),
+    );
+    try {
+      using((arena) {
+        final material = arena<native.EshiMaterial>();
+        material.ref
+          ..cpu_shader = ffi.nullptr
+              .cast<ffi.NativeFunction<native.EshiShaderFnFunction>>()
+          ..source_path = source.cast()
+          ..package_path = ffi.nullptr
+          ..uniform_data = uniforms.cast()
+          ..uniform_size = uniformFloatCount * ffi.sizeOf<ffi.Float>();
+        _checkNative(
+          native.eshi_material_set(pointer, material),
+          'eshi_material_set',
+        );
+      });
+    } catch (_) {
+      buffer._release();
+      rethrow;
+    }
+    _materialBuffer?._release();
+    _materialBuffer = buffer;
+    return buffer;
+  }
+
+  /// Resolves the current entity handle for a retained scene key.
+  int sceneEntity(int key) {
+    _requireU32(key, 'key');
+    if (key == 0) throw RangeError.value(key, 'key', 'must be non-zero');
+    final entity = native.eshi_scene_entity(_requirePointer(), key);
+    if (entity == 0) {
+      throw StateError('No live scene entity is bound to key $key.');
+    }
+    return entity;
+  }
+
+  ({double x, double y}) transformOf(int entity) => using((arena) {
+    final x = arena<ffi.Float>();
+    final y = arena<ffi.Float>();
+    _checkNative(
+      native.eshi_transform_get(_requirePointer(), entity, x, y),
+      'eshi_transform_get',
+    );
+    return (x: x.value, y: y.value);
+  });
+
+  ({double x, double y}) velocityOf(int entity) => using((arena) {
+    final x = arena<ffi.Float>();
+    final y = arena<ffi.Float>();
+    _checkNative(
+      native.eshi_velocity_get(_requirePointer(), entity, x, y),
+      'eshi_velocity_get',
+    );
+    return (x: x.value, y: y.value);
+  });
+
+  void setTransform(int entity, {required double x, required double y}) {
+    _checkNative(
+      native.eshi_transform_set(_requirePointer(), entity, x, y),
+      'eshi_transform_set',
+    );
+  }
+
+  void setVelocity(int entity, {required double x, required double y}) {
+    _checkNative(
+      native.eshi_velocity_set(_requirePointer(), entity, x, y),
+      'eshi_velocity_set',
+    );
+  }
+
   /// Releases native state. Repeating the call on the owner isolate is safe.
   void dispose() {
     _requireOwnerIsolate();
@@ -153,6 +251,8 @@ final class LarimarWorld {
       return;
     }
     native.eshi_world_destroy(_pointer);
+    _materialBuffer?._release();
+    _materialBuffer = null;
     _pointer = ffi.nullptr;
     _disposed = true;
   }

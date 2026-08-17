@@ -136,18 +136,24 @@ analysis/widget test on Linux x86_64 and macOS Apple Silicon. Both Dart FFI jobs
 are strict required checks on `feat/larimar`; the scaffolded macOS application
 also builds locally with the native library embedded.
 
-### Step 4 — Land `EshiView` on macOS
+### Step 4 — Land `EshiView` on macOS — **in progress**
 
 Dependency: Step 3.
 
-- Implement a macOS Flutter texture registrar adapter backed by a Metal texture
+- [x] Implement a macOS Flutter texture registrar adapter backed by a Metal texture
   that Larimar/Filament can render into without CPU framebuffer readback.
-- Keep the texture, camera, and swapchain per view; keep the world and assets
-  shareable. Never expose platform or Filament types through `eshi.h`.
-- Specify render-thread ownership and marshal resize, frame-available, app
+- [x] Keep the texture target per view and the world shareable. Camera and
+  Filament swapchain ownership lands with Step 5's scene backend; the current
+  fullscreen Brush backend owns neither resource. Never expose platform or
+  Filament types through `eshi.h`.
+- [x] Specify render-thread ownership and marshal resize, frame-available, app
   suspend/resume, and disposal operations to it.
-- First render existing Pong through the widget; this isolates host/texture
+- [x] First render existing Pong through the widget; this isolates host/texture
   correctness from unfinished 3D scene work.
+- [x] Exercise five real create/resize/pause/resume/destroy cycles in the macOS
+  integration runner and cover delayed creation/disposal with widget tests.
+- [ ] Run the real lifecycle loop under leak/race diagnostics and retain a
+  captured visual artifact before declaring the Step 4 gate complete.
 
 Gate: a widget integration test repeatedly creates, resizes, backgrounds,
 foregrounds, and destroys `EshiView` under leak/race diagnostics, while a visual
@@ -255,5 +261,6 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 - **Control RC scope.** Physics, audio, SumiC, and additional platforms are
   important but cannot enter RC0 unless they close a required gate above.
 
-The immediate next task after Step 1 turns green is Step 2: freeze the ABI and
-wire-format fixtures before Dart code depends on them.
+The immediate next task is to close Step 4's diagnostic evidence: run the real
+macOS lifecycle loop under leak/race tooling, retain the animated Pong/Flutter
+overlay artifact, then merge the EshiView slice before beginning Filament 3D.

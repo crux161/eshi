@@ -54,8 +54,9 @@ void eshi__frame_params(EshiWorld* w,
  * table here and nothing else.
  * -------------------------------------------------------------------------*/
 typedef struct EshiBackend EshiBackend;
+typedef struct EshiBackendVTable EshiBackendVTable;
 
-typedef struct EshiBackendVTable {
+struct EshiBackendVTable {
     const char* name;
 
     /** Probes whether this backend can run right now. */
@@ -76,13 +77,32 @@ typedef struct EshiBackendVTable {
                          uint8_t* pixels, int32_t stride, float time,
                          EshiShaderFn cpu_shader,
                          const void* uniforms, size_t uniform_size);
-} EshiBackendVTable;
+};
+
+/**
+ * Borrows the world's selected backend. Host adapters use this only to route
+ * an opaque platform render target to the matching private backend entry
+ * point; neither value is part of the installed C ABI.
+ */
+EshiBackend* eshi__world_backend(EshiWorld* w,
+                                 const EshiBackendVTable** out_vtable);
 
 /* Implemented per backend; the unavailable ones compile to stubs. */
 const EshiBackendVTable* eshi__backend_ink(void);
 const EshiBackendVTable* eshi__backend_gl(void);
 const EshiBackendVTable* eshi__backend_metal(void);
 const EshiBackendVTable* eshi__backend_filament(void);
+
+/**
+ * Renders into a borrowed id<MTLTexture>, passed as an opaque pointer.
+ *
+ * This symbol is intentionally absent from eshi.h: it is consumed only by the
+ * macOS Flutter host. The caller retains the texture until the synchronous
+ * submission completes.
+ */
+EshiResult eshi__metal_render_texture(EshiWorld* w,
+                                      void* metal_texture,
+                                      float time);
 
 /** Maps a grade to its table, or NULL if the grade has no backend here. */
 const EshiBackendVTable* eshi__backend_for_grade(EshiGrade grade);

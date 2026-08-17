@@ -208,14 +208,14 @@ jobs:
       - name: Check generated bindings
         working-directory: bindings/dart/larimar
         run: |
-          dart pub get
+          flutter pub get
           ../../../scripts/check_dart_bindings.sh
 
-      - name: Analyze and test the Dart package
+      - name: Analyze and test the Flutter FFI package
         working-directory: bindings/dart/larimar
         run: |
-          dart analyze
-          dart test --reporter expanded
+          flutter analyze
+          flutter test --reporter expanded
 
       - name: Analyze and test the Flutter reference app
         working-directory: examples/larimar_flutter
@@ -236,12 +236,12 @@ jobs:
           flutter-version: 3.38.9
           cache: true
 
-      - name: Analyze and test the Dart package
+      - name: Analyze and test the Flutter FFI package
         working-directory: bindings/dart/larimar
         run: |
-          dart pub get
-          dart analyze
-          dart test --reporter expanded
+          flutter pub get
+          flutter analyze
+          flutter test --reporter expanded
 
       - name: Analyze and test the Flutter reference app
         working-directory: examples/larimar_flutter
@@ -249,3 +249,7 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test --reporter expanded
+
+      - name: Exercise the macOS EshiView lifecycle
+        working-directory: examples/larimar_flutter
+        run: flutter test integration_test/eshiview_smoke_test.dart -d macos --reporter expanded

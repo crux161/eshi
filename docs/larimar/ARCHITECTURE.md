@@ -503,7 +503,7 @@ point's signature — a helper function cannot see it.
 
 ### Phase 2 — SDL3 + host hardening (§6.10)
 
-### Phase 3 — Dart — **native half landed**
+### Phase 3 — Dart — **package and macOS texture host landed**
 
 The two subsystems §6.6 and §6.7 describe are built, tested, and proven against
 Pong. They were built *before* Dart deliberately: both are testable in C++ with
@@ -520,8 +520,8 @@ gets a vote on its shape.
 | Bulk event drain (§6.7) | `core/src/scene.cpp` | Done — same framing in reverse; overflow reported, not truncated |
 | C++ encoder/decoder | `core/include/eshi/scene.hpp` | Done — header-only, and the executable spec of the format |
 | Pong on the reconciler | `examples/pong/pong.cpp` | Done — the scene is a description, not a sequence of `eshi_entity_create()` calls |
-| `ffigen` bindings from `eshi.h` | — | Not started |
-| Flutter embedder + external texture, macOS first (§6.11) | — | Not started |
+| `ffigen` bindings from `eshi.h` | `bindings/dart/larimar` | Done — generated ABI bindings, owned world/buffers, golden codecs, drift gate |
+| Flutter embedder + external texture, macOS first (§6.11) | `bindings/dart/larimar/macos` | Host slice landed — IOSurface/CVPixelBuffer/Metal texture, direct Brush submission, lifecycle integration test; leak/race diagnostic gate remains |
 
 Four things came out of building it that were not obvious from §6.6.
 

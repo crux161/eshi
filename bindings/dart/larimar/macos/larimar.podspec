@@ -1,0 +1,22 @@
+Pod::Spec.new do |s|
+  s.name             = 'larimar'
+  s.version          = '0.1.0-dev.2'
+  s.summary          = 'Larimar macOS external-texture host.'
+  s.description      = <<-DESC
+IOSurface-backed Flutter textures for the Larimar game engine.
+                       DESC
+  s.homepage         = 'https://github.com/crux161/eshi'
+  s.license          = { :type => 'MIT' }
+  s.author           = 'Larimar contributors'
+  s.source           = { :path => '.' }
+  s.source_files     = 'larimar/Sources/larimar/**/*.{h,mm}'
+  s.public_header_files = 'larimar/Sources/larimar/include/**/*.h'
+  s.header_mappings_dir = 'larimar/Sources/larimar/include'
+  s.dependency 'FlutterMacOS'
+  s.platform         = :osx, '12.0'
+  s.frameworks       = 'CoreVideo', 'Metal', 'IOSurface'
+  s.pod_target_xcconfig = {
+    'DEFINES_MODULE' => 'YES',
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++11',
+  }
+end

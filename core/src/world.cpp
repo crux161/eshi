@@ -825,6 +825,12 @@ extern "C" void eshi__frame_params(EshiWorld* w,
     if (out_height)       *out_height = w->cfg.height;
 }
 
+extern "C" EshiBackend* eshi__world_backend(
+    EshiWorld* w, const EshiBackendVTable** out_vtable) {
+    if (out_vtable) *out_vtable = w ? w->backend_vtable : NULL;
+    return w ? w->backend : NULL;
+}
+
 /* ===========================================================================
  * RNG
  * ==========================================================================*/

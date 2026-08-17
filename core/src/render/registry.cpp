@@ -33,6 +33,9 @@ const EshiBackendVTable kStubVTable = {
 
 #ifndef ESHI_HAVE_METAL
 extern "C" const EshiBackendVTable* eshi__backend_metal(void) { return &kStubVTable; }
+extern "C" EshiResult eshi__metal_render_texture(EshiWorld*, void*, float) {
+    return ESHI_ERR_UNSUPPORTED;
+}
 #endif
 
 #ifndef ESHI_HAVE_GL
