@@ -30,9 +30,14 @@ failed=0
 missing=0
 failed_names=""
 
-for source in examples/*.cpp; do
+# The gallery is authored in both C++ and Zig. The Zig example still produces
+# a normal executable with a portable GPU companion, so validate it by binary
+# name exactly like the C++ examples instead of silently leaving it outside the
+# gate.
+for source in examples/*.cpp examples/*.zig; do
     [ -e "$source" ] || continue
-    name=$(basename "$source" .cpp)
+    name=$(basename "$source")
+    name=${name%.*}
     binary="$BIN_DIR/$name"
 
     if [ ! -x "$binary" ]; then
