@@ -52,6 +52,11 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  # Keep the reference app on CocoaPods so it builds on the pinned Flutter
+  # release as well as current Flutter. The plugin still publishes SwiftPM
+  # metadata for applications that opt into that integration.
+  config:
+    enable-swift-package-manager: false
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
