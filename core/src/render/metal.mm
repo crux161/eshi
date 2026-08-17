@@ -44,7 +44,8 @@ int metal_available(void) {
     }
 }
 
-EshiBackend* metal_create(int32_t width, int32_t height, const char* source_path) {
+EshiBackend* metal_create(int32_t width, int32_t height,
+                          const char* source_path, const char* /*package_path*/) {
     if (!source_path) {
         std::fprintf(stderr,
                      "[eshi/metal] material has no source_path; GPU tiers cannot "

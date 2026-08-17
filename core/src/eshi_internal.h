@@ -41,11 +41,12 @@ typedef struct EshiBackendVTable {
     int (*available)(void);
 
     /**
-     * Creates backend state. `source_path` is the shader to transpile and
-     * compile, and may be NULL for backends that do not need one.
+     * Creates backend state. A backend consumes either runtime `source_path`,
+     * offline `package_path`, or neither for a compiled-in CPU shader.
      * Returns NULL on failure after writing a reason to stderr.
      */
-    EshiBackend* (*create)(int32_t width, int32_t height, const char* source_path);
+    EshiBackend* (*create)(int32_t width, int32_t height,
+                           const char* source_path, const char* package_path);
 
     void (*destroy)(EshiBackend* backend);
 
@@ -60,6 +61,7 @@ typedef struct EshiBackendVTable {
 const EshiBackendVTable* eshi__backend_ink(void);
 const EshiBackendVTable* eshi__backend_gl(void);
 const EshiBackendVTable* eshi__backend_metal(void);
+const EshiBackendVTable* eshi__backend_filament(void);
 
 /** Maps a grade to its table, or NULL if the grade has no backend here. */
 const EshiBackendVTable* eshi__backend_for_grade(EshiGrade grade);

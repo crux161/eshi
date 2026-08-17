@@ -169,7 +169,8 @@ bool alive(const EshiWorld* w, EshiEntity e) {
 }
 
 EshiEntity make_entity(uint32_t index, uint8_t generation) {
-    return (EshiEntity)((uint32_t)generation << 24 | (index & 0x00FFFFFFu));
+    return (EshiEntity)((uint32_t)generation << ESHI_ENTITY_INDEX_BITS |
+                        (index & ESHI_MAX_ENTITIES));
 }
 
 /* splitmix64 — small, seedable, and reproducible across platforms. */
@@ -432,6 +433,11 @@ extern "C" EshiGrade eshi_world_grade(const EshiWorld* w) {
     return w ? w->cfg.grade : ESHI_GRADE_INK;
 }
 
+extern "C" const char* eshi_world_backend_name(const EshiWorld* w) {
+    if (!w || !w->backend_vtable || !w->backend_vtable->name) return "unavailable";
+    return w->backend_vtable->name;
+}
+
 extern "C" void eshi_world_size(const EshiWorld* w, int32_t* out_w, int32_t* out_h) {
     if (!w) return;
     if (out_w) *out_w = w->cfg.width;
@@ -669,14 +675,15 @@ extern "C" int eshi_input_released(const EshiWorld* w, EshiKey key) {
  * ==========================================================================*/
 extern "C" EshiResult eshi_material_set(EshiWorld* w, const EshiMaterial* material) {
     if (!w || !material) return ESHI_ERR_INVALID;
-    if (!material->cpu_shader && !material->source_path) return ESHI_ERR_INVALID;
+    if (!material->cpu_shader && !material->source_path && !material->package_path) {
+        return ESHI_ERR_INVALID;
+    }
 
     /*
-     * The backend is built here rather than at world creation because the GPU
-     * tiers compile the shader up front and only learn the source path now.
-     * Rebinding therefore recompiles — which is exactly what shader hot-reload
-     * needs, and is available on the GPU tiers only (Ink's shader is compiled
-     * into the binary).
+     * The backend is built here rather than at world creation because renderers
+     * only learn the material's source or package path now. Rebinding therefore
+     * recompiles source-backed tiers or reloads a rebuilt package, which is the
+     * material hot-reload seam. Ink remains compiled into the binary.
      */
     if (w->backend) {
         w->backend_vtable->destroy(w->backend);
@@ -684,7 +691,8 @@ extern "C" EshiResult eshi_material_set(EshiWorld* w, const EshiMaterial* materi
     }
 
     EshiBackend* backend =
-        w->backend_vtable->create(w->cfg.width, w->cfg.height, material->source_path);
+        w->backend_vtable->create(w->cfg.width, w->cfg.height,
+                                  material->source_path, material->package_path);
     if (!backend) return ESHI_ERR_UNSUPPORTED;
 
     w->backend = backend;

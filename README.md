@@ -132,6 +132,33 @@ zig build eshi -Dsumi-path=../libsumi
 zig build examples -Dopengl=true
 ```
 
+#### Larimar First Light with Filament
+
+Glow Pong is the first vertical slice of Larimar's data-oriented engine: the
+game owns only its scene, components, systems, and material while the SDL host
+and renderer remain interchangeable. Its Ink, Paper, and direct-Metal paths are
+built by `zig build larimar`.
+
+To run the same ECS-driven game through Google Filament, first install the
+vendored Filament distribution (one-time, incremental afterward), then enable
+the optional backend:
+
+```bash
+cd resources/filament
+./build.sh -i release filament matc
+cd ../..
+
+zig build larimar -Dfilament=true
+./zig-out/bin/pong --grade brush --live
+```
+
+The build compiles `examples/pong/pong.mat` with Filament's `matc`, installs the
+package at `zig-out/share/eshi/pong.filamat`, and maps Kantei Brush to Filament.
+The public C API does not expose Filament types. To consume an already-installed
+distribution instead, pass `-Dfilament-path=/path/to/filament`; use
+`-Dfilament-arch=...` when its library directory is not the inferred `arm64` or
+`x86_64`.
+
 `-Dopengl` builds the OpenGL backend in `renderer_gl.h`, which needs the
 system GL library (`-framework OpenGL` on macOS, `libGL` elsewhere). It is off
 by default for two reasons: on macOS it takes precedence over Metal, because

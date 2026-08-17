@@ -1,6 +1,7 @@
 # Larimar — Engineering Architecture
 
-> Status: design, pre-implementation. Branch `feat/larimar`.
+> Status: active implementation. Phases 0, 1a, and Filament First Light are
+> landed on branch `feat/larimar`.
 > Companion to [PROPOSAL.md](PROPOSAL.md), which records the original vision
 > unedited. This document is the continuation of that proposal with the Gyosho
 > monorepo (S2L / SumiC / Hanga) factored in, and it states plainly where the
@@ -482,12 +483,18 @@ recording: every read of `eshi_uniforms` must happen inside `mainImage`,
 because GLSL exposes it as a global while MSL threads it through the entry
 point's signature — a helper function cannot see it.
 
-### Phase 1b — Filament as the 3D scene backend
-- `scripts/vendor_filament.sh` fetching prebuilts (§6.8).
-- `src/render/filament/` implementing the same vtable as the tiers above.
-- Filament now earns its place on what it uniquely adds — PBR, meshes, glTF,
-  shadows — rather than on fullscreen materials the salvaged backends already
-  cover. That is a much better trade than "drop-in replacement."
+### Phase 1b — Filament as the 3D scene backend — **First Light landed**
+
+- `core/src/render/filament.cpp` implements the existing backend vtable with a
+  headless offscreen Filament view. Brush selects it in Filament-enabled builds.
+- `examples/pong/pong.mat` is compiled by `matc` during `zig build larimar
+  -Dfilament=true`; the backend uploads the same opaque uniform float block used
+  by the lightweight GPU tiers.
+- The First Light readback preserves the framebuffer contract and pixel-matches
+  Ink. A Flutter hardware-texture host can later remove that copy without
+  changing the ECS or game API.
+- Still to do in this phase: mesh/renderable components, PBR, shadows, `gltfio`,
+  and consuming official prebuilt archives by default (§6.8).
 
 ### Phase 2 — SDL3 + host hardening (§6.10)
 
@@ -531,7 +538,7 @@ Pong, with **zero engine code in the game**:
       selected at runtime by Kantei grade, agreeing to within 1 LSB.
 - [ ] The same game source runs under **both** hosts — `hosts/sdl` and
       `hosts/flutter` — unmodified. *(Phase 3)*
-- [ ] …and on Filament. *(Phase 1b)*
+- [x] …and on Filament. *(Phase 1b First Light)*
 - [ ] Editing paddle speed in Dart and hot-reloading changes it live, and the
       scene does **not** duplicate (§6.6). *(Phase 3)*
 

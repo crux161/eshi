@@ -65,6 +65,25 @@ pub fn build(b: *std.Build) void {
         "opengl",
         "Build the legacy OpenGL renderer path (default: false; on macOS it takes precedence over Metal)",
     ) orelse false;
+    const use_filament = b.option(
+        bool,
+        "filament",
+        "Build Larimar's Filament backend (default: false)",
+    ) orelse false;
+    const filament_path = b.option(
+        []const u8,
+        "filament-path",
+        "Installed Filament distribution (default: resources/filament/out/release/filament)",
+    ) orelse "resources/filament/out/release/filament";
+    const filament_arch = b.option(
+        []const u8,
+        "filament-arch",
+        "Filament library architecture directory (default: inferred from target)",
+    ) orelse switch (target.result.cpu.arch) {
+        .aarch64 => "arm64",
+        .x86_64 => "x86_64",
+        else => @tagName(target.result.cpu.arch),
+    };
 
     if (use_metal and !is_macos) {
         std.debug.panic("-Dmetal=true is only supported for macOS targets", .{});
@@ -99,6 +118,17 @@ pub fn build(b: *std.Build) void {
 
     // Larimar: the Phase 0 engine core plus its hosts. Built independently of
     // the shadertoy gallery above so neither path can break the other.
+    const pong_package_path: ?[]const u8 = if (use_filament)
+        b.getInstallPath(.prefix, "share/eshi/pong.filamat")
+    else
+        null;
+    const pong_package: ?std.Build.LazyPath = if (use_filament) package: {
+        const matc = b.addSystemCommand(&.{b.pathJoin(&.{ filament_path, "bin", "matc" }), "-p", "all", "-a", "all", "-o"});
+        const output = matc.addOutputFileArg("pong.filamat");
+        matc.addFileArg(b.path("examples/pong/pong.mat"));
+        break :package output;
+    } else null;
+
     const larimar_install = addLarimarExecutable(b, .{
         .name = "pong",
         // ripple is linked in so the Ink tier has a compiled-in entry point for
@@ -110,11 +140,26 @@ pub fn build(b: *std.Build) void {
         .libomp_prefix = libomp_prefix,
         .use_openmp = use_openmp,
         .use_metal = use_metal,
+        .use_filament = use_filament,
+        .filament_path = filament_path,
+        .filament_arch = filament_arch,
+        .pong_package_path = pong_package_path,
         .use_lto = use_lto,
     });
     const larimar_step = b.step("larimar", "Build the Larimar core and the SDL host (pong)");
     larimar_step.dependOn(&larimar_install.step);
     b.getInstallStep().dependOn(&larimar_install.step);
+    if (pong_package) |package| {
+        const install_package = b.addInstallFile(package, "share/eshi/pong.filamat");
+        const install_filament_license = b.addInstallFile(
+            pathFromOption(b, b.pathJoin(&.{ filament_path, "LICENSE" })),
+            "share/licenses/filament/LICENSE",
+        );
+        larimar_step.dependOn(&install_package.step);
+        larimar_step.dependOn(&install_filament_license.step);
+        b.getInstallStep().dependOn(&install_package.step);
+        b.getInstallStep().dependOn(&install_filament_license.step);
+    }
 
     // Core tests link only the core: no SDL, no FFmpeg, no libsumi. If this
     // target ever needs one of them, the OS-oblivious boundary has been broken.
@@ -305,6 +350,10 @@ const LarimarOptions = struct {
     libomp_prefix: []const u8,
     use_openmp: bool,
     use_metal: bool,
+    use_filament: bool,
+    filament_path: []const u8,
+    filament_arch: []const u8,
+    pong_package_path: ?[]const u8,
     use_lto: bool,
 };
 
@@ -362,6 +411,47 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
         });
         module.linkFramework("Metal", .{});
         module.linkFramework("Foundation", .{});
+    }
+
+    // Filament replaces the direct-Metal implementation at Brush grade when
+    // explicitly enabled. It stays optional so the source-only vendor checkout
+    // does not make ordinary Ink/Paper builds depend on a multi-minute native
+    // dependency build.
+    if (options.use_filament) {
+        module.addCMacro("ESHI_HAVE_FILAMENT", "1");
+        if (options.pong_package_path) |package_path| {
+            module.addCMacro("ESHI_PONG_PACKAGE_PATH", b.fmt("\"{s}\"", .{package_path}));
+        }
+        module.addSystemIncludePath(pathFromOption(b, b.pathJoin(&.{ options.filament_path, "include" })));
+        module.addLibraryPath(pathFromOption(b, b.pathJoin(&.{ options.filament_path, "lib", options.filament_arch })));
+        module.addCSourceFile(.{
+            .file = b.path("core/src/render/filament.cpp"),
+            .flags = &.{ "-std=c++20", "-Wall", "-Wextra" },
+            .language = .cpp,
+        });
+
+        const filament_libraries = [_][]const u8{
+            "filament",
+            "backend",
+            "filabridge",
+            "filaflat",
+            "bluegl",
+            "bluevk",
+            "smol-v",
+            "utils",
+            "zstd",
+        };
+        for (filament_libraries) |library| {
+            module.linkSystemLibrary(library, .{ .use_pkg_config = .no });
+        }
+        if (options.target.result.os.tag == .macos) {
+            module.linkFramework("Cocoa", .{});
+            module.linkFramework("CoreVideo", .{});
+            module.linkFramework("Metal", .{});
+            module.linkFramework("QuartzCore", .{});
+        } else if (options.target.result.os.tag == .linux) {
+            module.linkSystemLibrary("dl", .{ .use_pkg_config = .no });
+        }
     }
 
     module.addCSourceFiles(.{

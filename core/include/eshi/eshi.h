@@ -31,10 +31,10 @@ extern "C" {
 /* ===========================================================================
  * Kantei (判定) — hardware capability grades.
  *
- * The grade selects a render backend. Ink is below Filament's GLES 2.0 floor
- * and is reachable on CPU-only targets; it is the tier the gallery and the
- * embedded targets live on, and it is not transitional. Paper/Brush/Gold are
- * reserved for the Filament backend (Phase 1) and are rejected today.
+ * The grade selects a render backend. Ink is below Filament's hardware floor
+ * and remains reachable on CPU-only targets. Paper uses the lightweight GL
+ * backend. Brush uses direct Metal by default and Filament when that optional
+ * integration is built. Gold remains reserved for specialized hardware.
  * ==========================================================================*/
 typedef enum EshiGrade {
     ESHI_GRADE_INK   = 1, /**< Pure CPU / software raster. ESP32, Playdate, server. */
@@ -57,18 +57,21 @@ const char* eshi_grade_string(EshiGrade g);
 /* ===========================================================================
  * Entities
  *
- * 32 bits: 24-bit index + 8-bit generation. The generation makes a stale
+ * 32-bit storage: 17-bit index + 8-bit generation. The generation makes a stale
  * handle detectable rather than silently aliasing a recycled slot. Width and
- * layout match Filament's utils::Entity so Phase 1 can adopt it as the shared
- * id without a translation table.
+ * bit layout match Filament's utils::Entity in the vendored release so the
+ * render bridge can adopt it as the shared id without a translation table.
  * ==========================================================================*/
 typedef uint32_t EshiEntity;
 
 #define ESHI_NULL_ENTITY   ((EshiEntity)0)
-#define ESHI_MAX_ENTITIES  ((uint32_t)0x00FFFFFFu)
+#define ESHI_ENTITY_INDEX_BITS       17u
+#define ESHI_ENTITY_GENERATION_BITS  8u
+#define ESHI_MAX_ENTITIES            ((uint32_t)0x0001FFFFu)
 
-#define ESHI_ENTITY_INDEX(e)      ((uint32_t)((e) & 0x00FFFFFFu))
-#define ESHI_ENTITY_GENERATION(e) ((uint32_t)(((e) >> 24) & 0xFFu))
+#define ESHI_ENTITY_INDEX(e)      ((uint32_t)((e) & ESHI_MAX_ENTITIES))
+#define ESHI_ENTITY_GENERATION(e) \
+    ((uint32_t)(((e) >> ESHI_ENTITY_INDEX_BITS) & 0xFFu))
 
 /* ===========================================================================
  * World lifecycle
@@ -91,6 +94,8 @@ EshiWorld* eshi_world_create(const EshiConfig* cfg);
 void       eshi_world_destroy(EshiWorld* w);
 
 EshiGrade eshi_world_grade(const EshiWorld* w);
+/** Human-readable implementation selected for this world (for diagnostics). */
+const char* eshi_world_backend_name(const EshiWorld* w);
 void      eshi_world_size(const EshiWorld* w, int32_t* out_w, int32_t* out_h);
 
 /* ===========================================================================
@@ -272,17 +277,20 @@ typedef void (*EshiShaderFn)(float* out_rgba,
  * A material, described once for every tier.
  *
  * Ink executes `cpu_shader` directly — it is compiled into the binary. The GPU
- * tiers cannot call a host function pointer, so they take `source_path` and
- * transpile-and-compile it at runtime. Supplying both is what lets one material
- * run on every grade; supplying one restricts the material to those tiers.
+ * tiers cannot call a host function pointer. Lightweight GPU backends take
+ * `source_path` and transpile it at runtime; packaged renderers take a material
+ * package produced by the offline toolchain. Supplying all representations is
+ * what lets one material run on every grade; omitting one restricts it to the
+ * remaining tiers.
  *
- * A consequence worth knowing: because the GPU tiers read source at runtime,
- * they get shader hot-reload for free, and Ink cannot have it. That asymmetry
- * is inherent, not an oversight.
+ * Source-backed tiers get shader hot-reload by rebinding after a file change.
+ * Package-backed tiers rebind a rebuilt package; Ink remains compiled into the
+ * host binary. The representation changes, but the material API does not.
  */
 typedef struct EshiMaterial {
     EshiShaderFn cpu_shader;   /**< Ink. NULL restricts the material to GPU tiers. */
-    const char*  source_path;  /**< Paper/Brush/Gold. NULL restricts it to Ink. */
+    const char*  source_path;  /**< Runtime-transpiled source, or NULL. */
+    const char*  package_path; /**< Offline-compiled material package, or NULL. */
     void*        uniform_data; /**< Caller-owned block, or NULL. */
     size_t       uniform_size; /**< Bytes of `uniform_data`. */
 } EshiMaterial;

@@ -228,8 +228,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::printf("Eshi/Larimar  grade=%s  %dx%d  seed=%llu  scene=%s\n",
+    std::printf("Eshi/Larimar  grade=%s  backend=%s  %dx%d  seed=%llu  scene=%s\n",
                 eshi_grade_string(eshi_world_grade(world)),
+                eshi_world_backend_name(world),
                 width, height, (unsigned long long)seed,
                 gallery ? "ripple" : "pong");
 
@@ -245,6 +246,7 @@ int main(int argc, char** argv) {
         EshiMaterial material;
         material.cpu_shader = eshi::shader_no_uniforms<mainImage>();
         material.source_path = "examples/ripple.cpp";
+        material.package_path = NULL;
         material.uniform_data = NULL;
         material.uniform_size = 0;
 

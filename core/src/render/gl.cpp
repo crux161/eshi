@@ -179,7 +179,8 @@ bool compile_stage(const GlFunctions& gl, GLuint shader, const char* what) {
 
 int gl_available(void) { return g_proc_loader != NULL ? 1 : 0; }
 
-EshiBackend* gl_create(int32_t width, int32_t height, const char* source_path) {
+EshiBackend* gl_create(int32_t width, int32_t height,
+                       const char* source_path, const char* /*package_path*/) {
     if (!g_proc_loader) {
         std::fprintf(stderr,
                      "[eshi/gl] no proc loader; the host must call "

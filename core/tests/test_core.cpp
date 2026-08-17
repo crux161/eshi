@@ -9,6 +9,7 @@
  */
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 #include <eshi/eshi.h>
 
@@ -57,6 +58,8 @@ void test_grade_gate() {
     EshiWorld* w = make_world();
     check(w != NULL, "Ink grade is accepted");
     check(eshi_world_grade(w) == ESHI_GRADE_INK, "grade round-trips");
+    check(std::strcmp(eshi_world_backend_name(w), "ink") == 0,
+          "world reports the selected backend");
     eshi_world_destroy(w);
 }
 
@@ -80,6 +83,7 @@ void test_material_and_render() {
     EshiMaterial empty;
     empty.cpu_shader = NULL;
     empty.source_path = NULL;
+    empty.package_path = NULL;
     empty.uniform_data = NULL;
     empty.uniform_size = 0;
     check(eshi_material_set(w, &empty) == ESHI_ERR_INVALID,
@@ -89,6 +93,7 @@ void test_material_and_render() {
     EshiMaterial material;
     material.cpu_shader = flat_shader;
     material.source_path = NULL;
+    material.package_path = NULL;
     material.uniform_data = &red;
     material.uniform_size = sizeof(red);
     check(eshi_material_set(w, &material) == ESHI_OK, "Ink accepts a cpu_shader material");

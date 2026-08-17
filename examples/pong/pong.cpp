@@ -198,14 +198,19 @@ void build(EshiWorld* w, Game* g) {
     eshi_system_add(w, "pong.present",  ESHI_ORDER_PRESENT,     system_present,       g);
 
     /*
-     * One material, both roles. Ink executes the typed mainImage below; the GPU
-     * tiers transpile the sidecar, which is the same material re-expressed
-     * against the flat `eshi_uniforms` array because a textual transpiler
-     * cannot lower a struct parameter into a shader binding.
+     * One material, three representations. Ink executes the typed mainImage
+     * below; lightweight GPU tiers transpile the sidecar; Filament loads the
+     * matc package. Both GPU forms use the same flat uniform layout because a
+     * shader toolchain cannot consume the game's C++ struct directly.
      */
     EshiMaterial material;
     material.cpu_shader = eshi::shader<Uniforms, mainImage>();
     material.source_path = "examples/pong/pong.gpu.cpp";
+#ifdef ESHI_PONG_PACKAGE_PATH
+    material.package_path = ESHI_PONG_PACKAGE_PATH;
+#else
+    material.package_path = NULL;
+#endif
     material.uniform_data = &g->uniforms;
     material.uniform_size = sizeof(g->uniforms);
     eshi_material_set(w, &material);

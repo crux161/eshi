@@ -29,7 +29,8 @@ struct InkBackend {
 
 int ink_available(void) { return 1; }
 
-EshiBackend* ink_create(int32_t width, int32_t height, const char* /*source_path*/) {
+EshiBackend* ink_create(int32_t width, int32_t height,
+                        const char* /*source_path*/, const char* /*package_path*/) {
     InkBackend* backend = new InkBackend();
     backend->width = width;
     backend->height = height;
