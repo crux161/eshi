@@ -159,6 +159,26 @@ distribution instead, pass `-Dfilament-path=/path/to/filament`; use
 `-Dfilament-arch=...` when its library directory is not the inferred `arm64` or
 `x86_64`.
 
+#### Hot-reload safety, without Dart
+
+Pong's scene is a *description* submitted through the engine's command buffer,
+not a sequence of `eshi_entity_create()` calls. A reconciler diffs it against
+the live world by stable key, so re-submitting it is a no-op — which is what
+makes Flutter's hot reload safe later, since it re-runs `build()` without
+unwinding native state.
+
+`--reload N` re-submits that description every N frames. Retained mode means the
+digest must not move:
+
+```bash
+./zig-out/bin/pong --grade ink --res 320x180 --frames 400 --seed 42 --hash
+./zig-out/bin/pong --grade ink --res 320x180 --frames 400 --seed 42 --hash --reload 1
+```
+
+Both print `digest=b9321cc6ecbe3e26 … entities=5 nodes=5`, the second having
+re-described the whole scene 399 times along the way. Built imperatively, those
+same reloads would have left 2000 entities behind.
+
 `-Dopengl` builds the OpenGL backend in `renderer_gl.h`, which needs the
 system GL library (`-framework OpenGL` on macOS, `libGL` elsewhere). It is off
 by default for two reasons: on macOS it takes precedence over Metal, because

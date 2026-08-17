@@ -55,13 +55,25 @@ struct Game {
     EshiEntity ball;
     EshiEntity wall[2];
 
+    uint32_t epoch; /* scene submissions are monotonic; see reload() */
     int      score_l;
     int      score_r;
     Uniforms uniforms;
 };
 
-/** Creates entities, registers systems, binds the material. */
+/** Submits the scene description, registers systems, binds the material. */
 void build(EshiWorld* w, Game* g);
+
+/**
+ * Re-submits the scene description at a fresh epoch.
+ *
+ * The native stand-in for a Dart hot reload, and the thing §6.6 exists to make
+ * safe: it runs the same description through the reconciler again mid-rally.
+ * Nothing should move. `pong --hash --reload N` produces the same digest as
+ * `pong --hash`, which is that claim measured at the framebuffer rather than
+ * asserted in a comment.
+ */
+void reload(EshiWorld* w, Game* g);
 
 /** Recentres the ball and sends it toward `direction` (-1 left, +1 right). */
 void serve(EshiWorld* w, Game* g, float direction);

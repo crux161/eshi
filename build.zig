@@ -173,6 +173,7 @@ pub fn build(b: *std.Build) void {
     test_module.addCSourceFiles(.{
         .files = &.{
             "core/src/world.cpp",
+            "core/src/scene.cpp",
             "core/src/render/registry.cpp",
             "core/src/render/transpile.cpp",
             "core/src/render/ink.cpp",
@@ -391,6 +392,7 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
     module.addCSourceFiles(.{
         .files = &.{
             "core/src/world.cpp",
+            "core/src/scene.cpp",
             "core/src/render/registry.cpp",
             "core/src/render/transpile.cpp",
             "core/src/render/ink.cpp",

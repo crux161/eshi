@@ -48,7 +48,8 @@ typedef enum EshiResult {
     ESHI_ERR_INVALID     = -1, /**< Bad argument or dead entity. */
     ESHI_ERR_UNSUPPORTED = -2, /**< Grade or feature not built in this binary. */
     ESHI_ERR_NOMEM       = -3,
-    ESHI_ERR_LIMIT       = -4  /**< A fixed capacity was exhausted. */
+    ESHI_ERR_LIMIT       = -4, /**< A fixed capacity was exhausted. */
+    ESHI_ERR_STALE       = -5  /**< A scene older than the world's epoch; ignored. */
 } EshiResult;
 
 const char* eshi_result_string(EshiResult r);
@@ -241,6 +242,159 @@ void eshi_input_set_key(EshiWorld* w, EshiKey key, int down);
 int  eshi_input_down(const EshiWorld* w, EshiKey key);
 int  eshi_input_pressed(const EshiWorld* w, EshiKey key);   /**< Edge: up -> down. */
 int  eshi_input_released(const EshiWorld* w, EshiKey key);  /**< Edge: down -> up. */
+
+/* ===========================================================================
+ * Command buffer — one boundary crossing per frame
+ *
+ * A dart:ffi leaf call is cheap but not free, and thousands of them per frame
+ * plus the attendant GC pressure is exactly the overhead the data-oriented
+ * layout exists to remove. So the boundary is crossed in bulk: the world owns
+ * one buffer of 32-bit words, the caller maps it once — Dart wraps the same
+ * bytes in an Int32List and a Float32List through asTypedList — writes packed
+ * commands into it, and calls eshi_commands_flush() once. Events travel the
+ * same way in reverse. Bulk in, bulk out.
+ *
+ * Wire format. Every command is one header word followed by its payload:
+ *
+ *     [ opcode:16 | payload_words:16 ][ payload_0 ] ... [ payload_n-1 ]
+ *
+ * The length in the header is what lets the decoder bounds-check a buffer
+ * written by another language, and what lets a newer writer append payload
+ * words an older reader ignores. It is deliberately *not* a licence to skip
+ * unknown opcodes: an opcode this core does not implement stops the flush with
+ * ESHI_ERR_UNSUPPORTED, because a Dart package that silently drops half a
+ * scene is worse than one that refuses to run against a mismatched core.
+ *
+ * Float payloads are IEEE-754 bit patterns carried in a word.
+ * ==========================================================================*/
+typedef enum EshiCommand {
+    ESHI_CMD_NOP         = 0, /**< No payload. Padding. */
+    ESHI_CMD_SCENE_BEGIN = 1, /**< u32 epoch. Opens a reconcile pass. */
+    ESHI_CMD_NODE        = 2, /**< u32 key, non-zero. Selects/creates a node. */
+    ESHI_CMD_TRANSFORM   = 3, /**< f32 x, f32 y. */
+    ESHI_CMD_VELOCITY    = 4, /**< f32 vx, f32 vy. */
+    ESHI_CMD_COLLIDER    = 5, /**< f32 hx, hy; u32 layer, mask, flags. */
+    ESHI_CMD_RESTITUTION = 6, /**< f32 restitution. */
+    ESHI_CMD_BOUNDS      = 7, /**< f32 min_x, max_x, min_y, max_y. */
+    ESHI_CMD_SCENE_END   = 8, /**< No payload. Runs the sweep. */
+    ESHI_CMD_INPUT       = 9  /**< u32 EshiKey, u32 down. */
+} EshiCommand;
+
+#define ESHI_CMD_HEADER(op, words) \
+    ((uint32_t)(((uint32_t)(op) & 0xFFFFu) | ((uint32_t)(words) << 16)))
+#define ESHI_CMD_OP(header)    ((uint32_t)((header) & 0xFFFFu))
+#define ESHI_CMD_WORDS(header) ((uint32_t)((header) >> 16))
+
+/**
+ * Grows the shared command buffer to at least `words` words.
+ *
+ * Invalidates every pointer previously returned by eshi_commands_data(), so a
+ * mapped typed view must be rebuilt after this call. Callers that size the
+ * buffer once at startup never see that happen.
+ */
+EshiResult eshi_commands_reserve(EshiWorld* w, uint32_t words);
+
+/** Base of the shared command buffer, or NULL before the first reserve. */
+uint32_t* eshi_commands_data(EshiWorld* w);
+uint32_t  eshi_commands_capacity(const EshiWorld* w);
+
+/**
+ * Decodes the first `word_count` words of the shared buffer.
+ *
+ * @param out_applied  Optional. Commands successfully applied, which on an
+ *                     error is where the decoder stopped.
+ * @return ESHI_OK, ESHI_ERR_STALE if a scene block was older than the world's
+ *         epoch and was ignored, or an error at the first bad command.
+ */
+EshiResult eshi_commands_flush(EshiWorld* w, uint32_t word_count, uint32_t* out_applied);
+
+/**
+ * The same decoder over caller-owned memory.
+ *
+ * eshi_commands_flush() is this call against the shared buffer. A C++ host that
+ * already has its own storage can skip the shared buffer entirely; Dart wants
+ * the shared one, because that is the copy that never crosses the boundary.
+ */
+EshiResult eshi_commands_submit(EshiWorld* w, const uint32_t* words,
+                                uint32_t word_count, uint32_t* out_applied);
+
+/* ===========================================================================
+ * Scene reconciler — retained, declarative, and safe to re-submit
+ *
+ * Dart's hot reload re-executes build(); it does not unwind native state. A
+ * scene built by calling eshi_entity_create() from initState() therefore leaves
+ * the old entities alive and creates a second set, and every reload doubles the
+ * scene. The fix is not to make reload smarter, it is to stop describing the
+ * scene imperatively.
+ *
+ * So a submission is a *description*: a list of nodes carrying stable keys. The
+ * reconciler diffs it against the live ECS and emits the create/update/destroy
+ * ops that close the gap — Flutter's own Widget -> Element -> RenderObject
+ * model, applied across FFI. Submitting the same description twice is a no-op;
+ * that property is what makes reload safe, and it is asserted in the tests.
+ *
+ * Two consequences worth stating outright:
+ *
+ *   - A component is written only when its described value *changed*. A reload
+ *     that edits paddle speed moves the paddle and leaves the ball mid-flight,
+ *     rather than teleporting the whole scene back to its spawn state. Systems
+ *     stay the owner of simulation; the description owns only what was declared.
+ *   - Dropping a node from the description destroys its entity, but dropping a
+ *     component from a node does not remove that component — the core has no
+ *     per-component removal yet. Drop the node instead.
+ *
+ * Epoch gating. A submission carries an epoch, and a scene older than the one
+ * the world has already accepted is ignored with ESHI_ERR_STALE rather than
+ * applied. That is what stops a closure left over from before a reload from
+ * sweeping away the scene the new code just built. The gate covers scene
+ * topology only: ESHI_CMD_INPUT is not part of the description and always
+ * applies.
+ *
+ * A scene may span several flushes; the sweep runs on ESHI_CMD_SCENE_END and
+ * nowhere else. A submission truncated before its end therefore leaves the
+ * live scene untouched instead of deleting whatever did not arrive.
+ * ==========================================================================*/
+
+/** The entity reconciled for `key`, or ESHI_NULL_ENTITY if there is none. */
+EshiEntity eshi_scene_entity(const EshiWorld* w, uint32_t key);
+
+/** Highest scene epoch this world has accepted. */
+uint32_t eshi_scene_epoch(const EshiWorld* w);
+
+/** Nodes currently retained by the reconciler. */
+uint32_t eshi_scene_node_count(const EshiWorld* w);
+
+/**
+ * Destroys every reconciled entity and forgets every key.
+ *
+ * The epoch is deliberately *not* rewound: unmounting a scene must not reopen
+ * the gate to a stale writer that is still holding a buffer.
+ */
+void eshi_scene_clear(EshiWorld* w);
+
+/* ===========================================================================
+ * Event buffer — the same trick in reverse
+ *
+ * Same framing as commands, so one codec serves both directions.
+ * ==========================================================================*/
+typedef enum EshiEventType {
+    ESHI_EVENT_COLLISION = 1 /**< u32 a, u32 b; f32 nx, ny, penetration. */
+} EshiEventType;
+
+EshiResult      eshi_events_reserve(EshiWorld* w, uint32_t words);
+const uint32_t* eshi_events_data(const EshiWorld* w);
+uint32_t        eshi_events_capacity(const EshiWorld* w);
+
+/**
+ * Packs this step's events into the shared event buffer.
+ *
+ * @param out_words  Optional. Words written, always a whole number of records.
+ * @return ESHI_OK, or ESHI_ERR_LIMIT when the buffer held only some of them —
+ *         in which case the caller should grow it with eshi_events_reserve()
+ *         rather than assume it saw everything. Unlike eshi_collisions_poll(),
+ *         which silently truncates at `max`, overflow here is reported.
+ */
+EshiResult eshi_events_pack(EshiWorld* w, uint32_t* out_words);
 
 /* ===========================================================================
  * Material — the fullscreen shader and its uniform block.

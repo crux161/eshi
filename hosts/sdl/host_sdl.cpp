@@ -97,6 +97,22 @@ void* gl_proc_loader(const char* name) {
     return (void*)SDL_GL_GetProcAddress(name);
 }
 
+/**
+ * Re-submits the game's scene description mid-run.
+ *
+ * The native stand-in for a Dart hot reload, and the cheapest test there is of
+ * the retained-mode claim in ARCHITECTURE.md §6.6. Because the reconciler
+ * writes a component only when its described value changed, a reload has to be
+ * *invisible*: `--hash --reload N` must produce the digest `--hash` does. The
+ * day it does not, either something started duplicating entities or the scene
+ * began stomping simulated state, and both are the failure this design exists
+ * to prevent.
+ */
+void maybe_reload(EshiWorld* w, pong::Game* game, bool gallery, int every, int frame) {
+    if (gallery || every <= 0 || frame <= 0 || (frame % every) != 0) return;
+    pong::reload(w, game);
+}
+
 void print_usage(const char* argv0) {
     std::printf(
         "usage: %s [--live] [--res WxH] [--frames N] [--seed N] [--out FILE]\n"
@@ -112,6 +128,9 @@ void print_usage(const char* argv0) {
         "  --dump DIR   Write every frame to DIR as raw PPM. The cross-tier\n"
         "               conformance oracle: no codec in the measurement path.\n"
         "  --encoder M  Video encoder: auto, hw (Apple media engine), sw.\n"
+        "  --reload N   Re-submit the scene description every N frames, standing\n"
+        "               in for a Dart hot reload. Retained mode means this must\n"
+        "               not change the digest.\n"
         "  --gallery    Run the ripple gallery shader instead of pong. Required\n"
         "               for the GPU tiers, which cannot execute pong's typed\n"
         "               uniform struct.\n",
@@ -132,6 +151,7 @@ int main(int argc, char** argv) {
     EncoderBackend encoder_backend = EncoderBackend::Auto;
     EshiGrade   grade = ESHI_GRADE_INK;
     int         frames = 600;
+    int         reload_every = 0;
     uint64_t    seed = 0x5EED5EEDull;
     std::string out_path = "pong.mp4";
 
@@ -148,6 +168,8 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--frames" && i + 1 < argc) {
             frames = std::atoi(argv[++i]);
+        } else if (arg == "--reload" && i + 1 < argc) {
+            reload_every = std::atoi(argv[++i]);
         } else if (arg == "--seed" && i + 1 < argc) {
             seed = (uint64_t)std::strtoull(argv[++i], NULL, 10);
         } else if (arg == "--out" && i + 1 < argc) {
@@ -285,6 +307,7 @@ int main(int argc, char** argv) {
         Uint64 previous = SDL_GetPerformanceCounter();
         const double freq = (double)SDL_GetPerformanceFrequency();
         bool running = true;
+        int  presented = 0;
 
         while (running) {
             SDL_Event event;
@@ -297,6 +320,7 @@ int main(int argc, char** argv) {
             previous = now;
             if (dt > 0.25f) dt = 0.25f;
 
+            maybe_reload(world, &game, gallery, reload_every, presented++);
             pump_input(world);
             eshi_tick(world, dt);
             if (eshi_input_down(world, ESHI_KEY_ESCAPE)) running = false;
@@ -325,6 +349,7 @@ int main(int argc, char** argv) {
         uint64_t digest = 1469598103934665603ull;
 
         for (int i = 0; i < frames; ++i) {
+            maybe_reload(world, &game, gallery, reload_every, i);
             eshi_tick(world, fixed_dt);
             eshi_render(world, framebuffer.data(), stride, (float)eshi_sim_time(world));
             digest ^= hash_framebuffer(framebuffer.data(), width, height, stride);
@@ -349,8 +374,15 @@ int main(int argc, char** argv) {
                 std::fclose(f);
             }
         }
-        std::printf("frames=%d digest=%016llx score=%d-%d\n",
-                    frames, (unsigned long long)digest, game.score_l, game.score_r);
+        /*
+         * entities/nodes are printed for the same reason the digest is: with
+         * --reload they are the visible half of the no-duplication claim. An
+         * imperatively built scene under repeated reloads grows both without
+         * bound, and the counts say so at a glance.
+         */
+        std::printf("frames=%d digest=%016llx score=%d-%d entities=%u nodes=%u\n",
+                    frames, (unsigned long long)digest, game.score_l, game.score_r,
+                    eshi_entity_count(world), eshi_scene_node_count(world));
 
     } else {
         /*
@@ -367,6 +399,7 @@ int main(int argc, char** argv) {
             int stride = 0;
             uint8_t* pixels = video.get_pixel_buffer(stride);
 
+            maybe_reload(world, &game, gallery, reload_every, i);
             eshi_tick(world, fixed_dt);
             eshi_render(world, pixels, stride, (float)eshi_sim_time(world));
 

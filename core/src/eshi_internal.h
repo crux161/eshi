@@ -16,6 +16,27 @@
 extern "C" {
 #endif
 
+/* ---------------------------------------------------------------------------
+ * Scene reconciler state
+ *
+ * The reconciler is a *client* of the public C API — it creates entities and
+ * sets components through eshi_entity_create()/eshi_transform_set()/… like any
+ * other caller, and so needs nothing from EshiWorld's layout except somewhere
+ * to keep its key table. The world lends it exactly that one slot. If the
+ * reconciler ever needs more than this, the public API was not sufficient to
+ * describe a scene, which is worth finding out.
+ * -------------------------------------------------------------------------*/
+typedef struct EshiSceneState EshiSceneState;
+
+EshiSceneState* eshi__scene_create(void);
+void            eshi__scene_destroy(EshiSceneState* scene);
+
+/** The world's scene slot, lazily populated on first use. Never NULL. */
+EshiSceneState** eshi__world_scene(EshiWorld* w);
+
+/** This step's collision events, borrowed. Valid until the next eshi_tick(). */
+const EshiCollisionEvent* eshi__collisions(const EshiWorld* w, int32_t* out_count);
+
 /** Everything a render backend needs for one frame. Any out-param may be NULL. */
 void eshi__frame_params(EshiWorld* w,
                         EshiShaderFn* out_shader,

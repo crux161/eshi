@@ -107,6 +107,42 @@ jobs:
       - name: Larimar core tests
         run: zig build test
 
+      # The retained-scene claim in ARCHITECTURE.md §6.6, as a gate rather than a
+      # paragraph. --reload 1 re-submits the entire scene description on every
+      # frame; if the reconciler starts duplicating entities or stomping
+      # simulated state, the digest moves. That is the exact failure Flutter's
+      # hot reload would otherwise hand us in Phase 3, and it is far cheaper to
+      # catch here than through an embedder.
+      #
+      # The non-degeneracy check below is not decoration. A reconciler broken
+      # *uniformly* — say one whose key lookup always misses — breaks the
+      # baseline and the reload run identically, and comparing the two would
+      # then pass while nothing worked at all. A pong that scores 0-0 over 400
+      # frames has a scene that never resolved, so the score is the cheap proof
+      # that there was something here to keep invariant.
+      - name: Scene reload is a no-op
+        run: |
+          set -eu
+          baseline=$(./zig-out/bin/pong --grade ink --res 320x180 \
+            --frames 400 --seed 42 --hash | tail -1)
+          reloaded=$(./zig-out/bin/pong --grade ink --res 320x180 \
+            --frames 400 --seed 42 --hash --reload 1 | tail -1)
+          echo "baseline: $baseline"
+          echo "reloaded: $reloaded"
+          case "$baseline" in
+            *"score=0-0"*)
+              echo '::error::Pong scored nothing in 400 frames; the scene never reconciled.'
+              exit 1 ;;
+          esac
+          if [ "$baseline" != "$reloaded" ]; then
+            echo '::error::Re-submitting the scene changed the frame output; the reconciler is no longer retained.'
+            exit 1
+          fi
+          case "$reloaded" in
+            *"entities=5 nodes=5"*) ;;
+            *) echo '::error::Scene entity count drifted under repeated reloads.'; exit 1 ;;
+          esac
+
       # Exercises both encoder paths and confirms each produces a decodable
       # stream. It deliberately does not assert that hardware was selected:
       # VideoToolbox can be absent under virtualization, and falling back to

@@ -12,6 +12,7 @@
 #include <cstring>
 
 #include <eshi/eshi.h>
+#include <eshi/scene.hpp>
 
 namespace {
 
@@ -346,6 +347,391 @@ void test_input_edges() {
     eshi_world_destroy(w);
 }
 
+/* ===========================================================================
+ * Command buffer and scene reconciler
+ *
+ * These carry more weight than the rest of the file. Everything above fails
+ * loudly when it breaks; the reconciler's failure mode is a Flutter app whose
+ * scene quietly doubles on every hot reload, which looks like a memory leak
+ * for a week before anyone counts the entities.
+ * ==========================================================================*/
+
+const uint32_t kKeyBall   = 101;
+const uint32_t kKeyPaddle = 102;
+const uint32_t kKeyWall   = 103;
+
+/** The scene these tests reconcile against, parameterised by what may change. */
+void describe(eshi::SceneWriter& scene, uint32_t epoch, float paddle_y, bool with_wall) {
+    scene.begin(epoch);
+
+    scene.node(kKeyBall)
+        .transform(0.0f, 0.0f)
+        .velocity(1.0f, 0.0f)
+        .collider(0.05f, 0.05f, 1u, 2u, ESHI_COLLIDER_NONE)
+        .restitution(1.0f);
+
+    scene.node(kKeyPaddle)
+        .transform(-1.0f, paddle_y)
+        .collider(0.02f, 0.2f, 2u, 1u, ESHI_COLLIDER_STATIC)
+        .bounds(-1.0f, -1.0f, -0.8f, 0.8f);
+
+    if (with_wall) {
+        scene.node(kKeyWall)
+            .transform(0.0f, 1.0f)
+            .collider(2.0f, 0.1f, 2u, 1u, ESHI_COLLIDER_STATIC);
+    }
+
+    scene.end();
+}
+
+void test_command_wire_format() {
+    std::printf("command wire format\n");
+    EshiWorld* w = make_world();
+
+    const uint32_t header = ESHI_CMD_HEADER(ESHI_CMD_COLLIDER, 5);
+    check(ESHI_CMD_OP(header) == (uint32_t)ESHI_CMD_COLLIDER, "opcode survives the header pack");
+    check(ESHI_CMD_WORDS(header) == 5, "payload length survives the header pack");
+
+    uint32_t applied = 0;
+
+    /* A payload that runs off the end of the buffer must not be read. */
+    const uint32_t truncated[2] = { ESHI_CMD_HEADER(ESHI_CMD_TRANSFORM, 2), 0u };
+    check(eshi_commands_submit(w, truncated, 2, &applied) == ESHI_ERR_INVALID,
+          "a payload longer than the buffer is rejected");
+    check(applied == 0, "nothing is applied from a malformed buffer");
+
+    /* Declaring fewer words than the opcode needs is equally malformed. */
+    const uint32_t short_payload[2] = { ESHI_CMD_HEADER(ESHI_CMD_TRANSFORM, 1), 0u };
+    check(eshi_commands_submit(w, short_payload, 2, &applied) == ESHI_ERR_INVALID,
+          "a payload shorter than the opcode's arity is rejected");
+
+    /*
+     * An opcode this core does not implement stops the flush. The length field
+     * is there to bounds-check and to tolerate *extra* payload, not to let a
+     * mismatched writer silently lose half a scene.
+     */
+    const uint32_t unknown[1] = { ESHI_CMD_HEADER(4095, 0) };
+    check(eshi_commands_submit(w, unknown, 1, &applied) == ESHI_ERR_UNSUPPORTED,
+          "an unknown opcode is refused rather than skipped");
+
+    /* Extra payload from a newer writer is ignored, not refused. */
+    const uint32_t extended[5] = {
+        ESHI_CMD_HEADER(ESHI_CMD_SCENE_BEGIN, 2), 7u, 0xDEADBEEFu,
+        ESHI_CMD_HEADER(ESHI_CMD_SCENE_END, 0), 0u
+    };
+    check(eshi_commands_submit(w, extended, 4, &applied) == ESHI_OK,
+          "a longer payload than this core reads is accepted");
+    check(eshi_scene_epoch(w) == 7, "the known prefix of an extended payload still applies");
+
+    /* Components need an open node; a stray one is a bug worth reporting. */
+    const uint32_t orphan[3] = { ESHI_CMD_HEADER(ESHI_CMD_TRANSFORM, 2), 0u, 0u };
+    check(eshi_commands_submit(w, orphan, 3, &applied) == ESHI_ERR_INVALID,
+          "a component with no open node is rejected");
+
+    eshi_world_destroy(w);
+}
+
+void test_shared_command_buffer() {
+    std::printf("shared command buffer\n");
+    EshiWorld* w = make_world();
+
+    check(eshi_commands_data(w) == NULL, "no buffer is allocated until it is asked for");
+    check(eshi_commands_reserve(w, 256) == ESHI_OK, "the buffer can be reserved");
+    check(eshi_commands_capacity(w) >= 256, "capacity reflects the reservation");
+
+    uint32_t* words = eshi_commands_data(w);
+    check(words != NULL, "the reserved buffer is mappable");
+
+    /* This is the shape Dart uses: write into the shared words, cross once. */
+    eshi::SceneWriter scene(words, eshi_commands_capacity(w));
+    describe(scene, 1, 0.0f, true);
+    check(!scene.overflowed(), "the description fits the reserved buffer");
+
+    uint32_t applied = 0;
+    check(eshi_commands_flush(w, scene.size(), &applied) == ESHI_OK, "flush succeeds");
+    check(applied > 0, "flush reports the commands it applied");
+    check(eshi_scene_node_count(w) == 3, "three described nodes became three nodes");
+    check(eshi_entity_count(w) == 3, "and three entities");
+
+    check(eshi_commands_flush(w, eshi_commands_capacity(w) + 1, NULL) == ESHI_ERR_LIMIT,
+          "flushing past the buffer's end is refused");
+
+    eshi_world_destroy(w);
+}
+
+void test_scene_reconcile() {
+    std::printf("scene reconcile\n");
+    EshiWorld* w = make_world();
+
+    uint32_t words[256];
+    eshi::SceneWriter scene(words, 256);
+    describe(scene, 1, 0.25f, true);
+    check(scene.submit(w) == ESHI_OK, "a scene description is accepted");
+
+    const EshiEntity ball = eshi_scene_entity(w, kKeyBall);
+    check(ball != ESHI_NULL_ENTITY, "a key resolves to an entity");
+    check(eshi_entity_alive(w, ball) == 1, "the reconciled entity is alive");
+    check(eshi_scene_entity(w, 999) == ESHI_NULL_ENTITY, "an undescribed key resolves to null");
+    check(eshi_scene_entity(w, 0) == ESHI_NULL_ENTITY, "key zero is never valid");
+    check(eshi_scene_epoch(w) == 1, "the world records the accepted epoch");
+
+    /* Every described component reached the ECS, not just the entity. */
+    float x = 0.0f, y = 0.0f;
+    check(eshi_transform_get(w, eshi_scene_entity(w, kKeyPaddle), &x, &y) == ESHI_OK,
+          "a described transform exists");
+    check_near(x, -1.0f, 1e-6f, "described x is applied");
+    check_near(y, 0.25f, 1e-6f, "described y is applied");
+
+    float vx = 0.0f;
+    check(eshi_velocity_get(w, ball, &vx, NULL) == ESHI_OK, "a described velocity exists");
+    check_near(vx, 1.0f, 1e-6f, "described velocity is applied");
+
+    eshi_scene_clear(w);
+    check(eshi_scene_node_count(w) == 0, "clear forgets every node");
+    check(eshi_entity_count(w) == 0, "clear destroys every reconciled entity");
+    check(eshi_scene_epoch(w) == 1,
+          "clear does not rewind the epoch, which would readmit a stale writer");
+
+    eshi_world_destroy(w);
+}
+
+/*
+ * The headline property. Imperative construction under Dart's hot reload — which
+ * re-runs build() without unwinding native state — produces a second set of
+ * entities every time. A description reconciled by key cannot.
+ */
+void test_scene_reload_does_not_duplicate() {
+    std::printf("scene reload does not duplicate\n");
+    EshiWorld* w = make_world();
+
+    uint32_t words[256];
+    EshiEntity first_ball = ESHI_NULL_ENTITY;
+
+    for (uint32_t reload = 1; reload <= 8; ++reload) {
+        eshi::SceneWriter scene(words, 256);
+        describe(scene, reload, 0.0f, true);
+        check(scene.submit(w) == ESHI_OK, "every re-submission is accepted");
+
+        if (reload == 1) first_ball = eshi_scene_entity(w, kKeyBall);
+    }
+
+    check(eshi_scene_node_count(w) == 3, "eight reloads leave three nodes");
+    check(eshi_entity_count(w) == 3, "eight reloads leave three entities");
+    /* Guarded, so the identity check below cannot pass by comparing two nulls. */
+    check(first_ball != ESHI_NULL_ENTITY, "the first reload produced a real entity");
+    check(eshi_scene_entity(w, kKeyBall) == first_ball,
+          "a reloaded node keeps its identity rather than being recreated");
+
+    /* Re-submitting the *same* epoch is a no-op too, not a stale rejection. */
+    eshi::SceneWriter again(words, 256);
+    describe(again, 8, 0.0f, true);
+    check(again.submit(w) == ESHI_OK, "the current epoch may be re-submitted");
+    check(eshi_entity_count(w) == 3, "re-submitting the same epoch changes nothing");
+
+    eshi_world_destroy(w);
+}
+
+/*
+ * The half of retained mode that makes hot reload usable rather than merely
+ * safe: reconciling writes a component only when its *described* value changed,
+ * so editing paddle speed in Dart does not also teleport the ball back to its
+ * spawn point mid-rally.
+ */
+void test_scene_updates_only_what_changed() {
+    std::printf("scene updates only what changed\n");
+    EshiWorld* w = make_world();
+
+    uint32_t words[256];
+    eshi::SceneWriter initial(words, 256);
+    describe(initial, 1, 0.0f, true);
+    initial.submit(w);
+
+    const EshiEntity ball = eshi_scene_entity(w, kKeyBall);
+
+    /* Let the simulation carry the ball away from its described spawn. */
+    for (int i = 0; i < 30; ++i) eshi_tick(w, 1.0f / 60.0f);
+
+    float simulated_x = 0.0f;
+    eshi_transform_get(w, ball, &simulated_x, NULL);
+    check(simulated_x > 0.1f, "the ball moved under simulation");
+
+    /* An identical description must leave the running simulation alone. */
+    eshi::SceneWriter unchanged(words, 256);
+    describe(unchanged, 2, 0.0f, true);
+    unchanged.submit(w);
+
+    float after_x = 0.0f;
+    eshi_transform_get(w, ball, &after_x, NULL);
+    check(after_x == simulated_x,
+          "re-submitting an unchanged value does not stomp simulated state");
+
+    /* An edited value must take effect — that is the point of the reload. */
+    eshi::SceneWriter edited(words, 256);
+    describe(edited, 3, 0.5f, true);
+    edited.submit(w);
+
+    float paddle_y = 0.0f;
+    eshi_transform_get(w, eshi_scene_entity(w, kKeyPaddle), NULL, &paddle_y);
+    check_near(paddle_y, 0.5f, 1e-6f, "an edited value is applied on reload");
+
+    eshi_transform_get(w, ball, &after_x, NULL);
+    check(after_x == simulated_x, "editing one node leaves the others simulating");
+
+    eshi_world_destroy(w);
+}
+
+void test_scene_sweep_destroys_dropped_nodes() {
+    std::printf("scene sweep\n");
+    EshiWorld* w = make_world();
+
+    uint32_t words[256];
+    eshi::SceneWriter initial(words, 256);
+    describe(initial, 1, 0.0f, true);
+    initial.submit(w);
+
+    const EshiEntity wall = eshi_scene_entity(w, kKeyWall);
+    const EshiEntity ball = eshi_scene_entity(w, kKeyBall);
+    check(eshi_entity_count(w) == 3, "three entities before the drop");
+
+    /* Same scene minus the wall: the sweep must take exactly that one. */
+    eshi::SceneWriter dropped(words, 256);
+    describe(dropped, 2, 0.0f, false);
+    dropped.submit(w);
+
+    check(eshi_scene_node_count(w) == 2, "the dropped node is forgotten");
+    check(eshi_entity_count(w) == 2, "and its entity is destroyed");
+    check(eshi_entity_alive(w, wall) == 0, "the dropped entity is dead");
+    check(eshi_entity_alive(w, ball) == 1, "the surviving entities are untouched");
+    check(eshi_scene_entity(w, kKeyWall) == ESHI_NULL_ENTITY, "its key no longer resolves");
+    check(eshi_scene_entity(w, kKeyBall) == ball, "surviving keys still resolve");
+
+    eshi_world_destroy(w);
+}
+
+/*
+ * A closure that outlived a hot reload and still holds a buffer will happily
+ * flush the scene it was built for. Without the epoch gate that submission
+ * sweeps away everything the new code just created.
+ */
+void test_scene_epoch_gate() {
+    std::printf("scene epoch gate\n");
+    EshiWorld* w = make_world();
+
+    uint32_t words[256];
+    eshi::SceneWriter current(words, 256);
+    describe(current, 5, 0.0f, true);
+    current.submit(w);
+    check(eshi_entity_count(w) == 3, "the current scene is live");
+
+    /* The stale writer describes a smaller scene at an older epoch. */
+    uint32_t stale_words[256];
+    eshi::SceneWriter stale(stale_words, 256);
+    describe(stale, 4, 0.0f, false);
+
+    check(stale.submit(w) == ESHI_ERR_STALE, "a stale scene is reported, not applied");
+    check(eshi_scene_epoch(w) == 5, "a stale scene does not move the epoch back");
+    check(eshi_entity_count(w) == 3, "a stale scene does not sweep the live one");
+    check(eshi_scene_entity(w, kKeyWall) != ESHI_NULL_ENTITY,
+          "the node the stale writer omitted survives");
+
+    /* Input rides outside the scene vocabulary, so the gate must not eat it. */
+    uint32_t input_words[8];
+    eshi::SceneWriter keys(input_words, 8);
+    keys.input(ESHI_KEY_SPACE, true);
+    check(keys.submit(w) == ESHI_OK, "input is accepted");
+    check(eshi_input_down(w, ESHI_KEY_SPACE) == 1, "input crosses in the command buffer");
+
+    eshi_world_destroy(w);
+}
+
+/*
+ * Scenes may span flushes, so the sweep runs on SCENE_END and nowhere else. The
+ * consequence that matters: a submission cut short does not delete whatever did
+ * not arrive.
+ */
+void test_scene_spans_flushes() {
+    std::printf("scene spans flushes\n");
+    EshiWorld* w = make_world();
+
+    uint32_t words[256];
+    eshi::SceneWriter initial(words, 256);
+    describe(initial, 1, 0.0f, true);
+    initial.submit(w);
+    check(eshi_entity_count(w) == 3, "the initial scene is live");
+
+    /* First half of a new epoch: opened, one node described, no end. */
+    eshi::SceneWriter head(words, 256);
+    head.begin(2).node(kKeyBall).transform(0.0f, 0.0f);
+    check(head.submit(w) == ESHI_OK, "a partial scene is accepted");
+    check(eshi_entity_count(w) == 3,
+          "an unterminated scene sweeps nothing, so truncation cannot delete a scene");
+
+    /* Second half, in its own flush. Now the sweep runs. */
+    eshi::SceneWriter tail(words, 256);
+    tail.node(kKeyPaddle).transform(-1.0f, 0.0f).end();
+    check(tail.submit(w) == ESHI_OK, "the continuation is accepted");
+    check(eshi_entity_count(w) == 2, "the sweep runs once the scene is closed");
+    check(eshi_scene_entity(w, kKeyWall) == ESHI_NULL_ENTITY,
+          "the node absent from the spanned scene is swept");
+
+    eshi_world_destroy(w);
+}
+
+void test_event_buffer() {
+    std::printf("event buffer\n");
+    EshiWorld* w = make_world();
+
+    /* Three mutually overlapping static colliders: three pairs, three events. */
+    const uint32_t kLayer = 1u << 0;
+    for (int i = 0; i < 3; ++i) {
+        EshiEntity e = eshi_entity_create(w);
+        eshi_transform_set(w, e, 0.05f * (float)i, 0.0f);
+        eshi_collider_set(w, e, 0.5f, 0.5f, kLayer, kLayer, ESHI_COLLIDER_STATIC);
+    }
+    eshi_tick(w, 1.0f / 60.0f);
+
+    check(eshi_events_reserve(w, 64) == ESHI_OK, "the event buffer can be reserved");
+
+    uint32_t written = 0;
+    check(eshi_events_pack(w, &written) == ESHI_OK, "events pack");
+    check(written == 3 * 6, "three collision records, six words each");
+
+    EshiCollisionEvent decoded[8];
+    eshi::EventReader reader(eshi_events_data(w), written);
+    int32_t count = 0;
+    while (count < 8 && reader.next_collision(&decoded[count])) ++count;
+    check(count == 3, "every packed record reads back");
+
+    EshiCollisionEvent direct[8];
+    const int32_t polled = eshi_collisions_poll(w, direct, 8);
+    check(polled == 3, "the per-call path agrees on the count");
+    check(decoded[0].a == direct[0].a && decoded[0].b == direct[0].b,
+          "the packed record names the same pair as the per-call path");
+    check(decoded[0].penetration == direct[0].penetration,
+          "float payloads survive the word round-trip exactly");
+
+    /*
+     * Overflow is reported rather than hidden. eshi_collisions_poll() silently
+     * truncates at `max`, which is how a game with a 16-event buffer misses the
+     * seventeenth hit and never learns it happened.
+     */
+    EshiWorld* small = make_world();
+    for (int i = 0; i < 3; ++i) {
+        EshiEntity e = eshi_entity_create(small);
+        eshi_transform_set(small, e, 0.05f * (float)i, 0.0f);
+        eshi_collider_set(small, e, 0.5f, 0.5f, kLayer, kLayer, ESHI_COLLIDER_STATIC);
+    }
+    eshi_tick(small, 1.0f / 60.0f);
+    eshi_events_reserve(small, 6);
+
+    written = 0;
+    check(eshi_events_pack(small, &written) == ESHI_ERR_LIMIT, "overflow is reported");
+    check(written == 6, "and reports the whole records that did fit");
+
+    eshi_world_destroy(small);
+    eshi_world_destroy(w);
+}
+
 } /* namespace */
 
 int main() {
@@ -361,6 +747,16 @@ int main() {
     test_determinism();
     test_system_ordering();
     test_input_edges();
+
+    test_command_wire_format();
+    test_shared_command_buffer();
+    test_scene_reconcile();
+    test_scene_reload_does_not_duplicate();
+    test_scene_updates_only_what_changed();
+    test_scene_sweep_destroys_dropped_nodes();
+    test_scene_epoch_gate();
+    test_scene_spans_flushes();
+    test_event_buffer();
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

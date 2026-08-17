@@ -14,6 +14,8 @@
  */
 #include "pong.h"
 
+#include <eshi/scene.hpp>
+
 #include <cmath>
 #include <cstdio>
 
@@ -25,6 +27,23 @@ namespace {
 const uint32_t kLayerBall   = 1u << 0;
 const uint32_t kLayerPaddle = 1u << 1;
 const uint32_t kLayerWall   = 1u << 2;
+
+/*
+ * Scene keys.
+ *
+ * The reconciler identifies an entity by its key, never by creation order, so
+ * these are the stable half of the contract: the description may gain, lose or
+ * reorder nodes and a paddle stays the same paddle. Dart will emit exactly
+ * these numbers from its widget keys.
+ */
+const uint32_t kNodePaddleL    = 1;
+const uint32_t kNodePaddleR    = 2;
+const uint32_t kNodeBall       = 3;
+const uint32_t kNodeWallTop    = 4;
+const uint32_t kNodeWallBottom = 5;
+
+/** Comfortably above the ~73 words the description below packs into. */
+const uint32_t kSceneWords = 128;
 
 const float kArenaX      = 1.77f;
 const float kArenaY      = 1.0f;
@@ -144,51 +163,111 @@ void serve(EshiWorld* w, Game* g, float direction) {
     g->uniforms.hit_timer = 0.0f;
 }
 
+namespace {
+
 /* ---------------------------------------------------------------------------
- * Scene construction
+ * Scene description
  *
- * Flat, declarative, and side-effect free apart from the world it is handed.
- * That shape is what Phase 3's Dart reconciler will diff against — it is
- * already a description of a scene rather than a sequence of mutations
- * entangled with a frame loop.
+ * Not a sequence of mutations — a description. Nothing here calls
+ * eshi_entity_create(); the reconciler diffs this against the live world and
+ * decides what to create, update or destroy. That is what makes it safe to run
+ * again at any moment, which is the whole of §6.6.
+ *
+ * Note what is *absent*: the ball has no transform and no velocity. Those are
+ * simulation state owned by serve(), not description, and declaring them here
+ * would put the reconciler and the game in an argument over who owns the ball.
+ * The rule that falls out — describe what the scene *is*, let systems own what
+ * it is *doing* — is the one Dart will follow too.
  * -------------------------------------------------------------------------*/
+void describe(eshi::SceneWriter& scene, uint32_t epoch) {
+    scene.begin(epoch);
+
+    /* Paddles: collide with the ball, never displaced by it. */
+    scene.node(kNodePaddleL)
+        .transform(-kArenaX + 0.1f, 0.0f)
+        .velocity(0.0f, 0.0f)
+        .collider(kPaddleHalfW, kPaddleHalfH,
+                  kLayerPaddle, kLayerBall, ESHI_COLLIDER_STATIC)
+        .bounds(-kArenaX + 0.1f, -kArenaX + 0.1f,
+                -kArenaY + kPaddleHalfH, kArenaY - kPaddleHalfH);
+
+    scene.node(kNodePaddleR)
+        .transform(kArenaX - 0.1f, 0.0f)
+        .velocity(0.0f, 0.0f)
+        .collider(kPaddleHalfW, kPaddleHalfH,
+                  kLayerPaddle, kLayerBall, ESHI_COLLIDER_STATIC)
+        .bounds(kArenaX - 0.1f, kArenaX - 0.1f,
+                -kArenaY + kPaddleHalfH, kArenaY - kPaddleHalfH);
+
+    scene.node(kNodeBall)
+        .collider(kBallRadius, kBallRadius,
+                  kLayerBall, kLayerPaddle | kLayerWall, ESHI_COLLIDER_NONE)
+        .restitution(1.0f);
+
+    /* Top and bottom walls are ordinary static colliders, not an `if` in the loop. */
+    scene.node(kNodeWallTop)
+        .transform(0.0f, kArenaY + 0.1f)
+        .collider(kArenaX + 1.0f, 0.1f, kLayerWall, kLayerBall, ESHI_COLLIDER_STATIC);
+
+    scene.node(kNodeWallBottom)
+        .transform(0.0f, -kArenaY - 0.1f)
+        .collider(kArenaX + 1.0f, 0.1f, kLayerWall, kLayerBall, ESHI_COLLIDER_STATIC);
+
+    scene.end();
+}
+
+/** Resolves the keys the game holds handles for. Cheap, and idempotent. */
+void bind(EshiWorld* w, Game* g) {
+    g->paddle_l = eshi_scene_entity(w, kNodePaddleL);
+    g->paddle_r = eshi_scene_entity(w, kNodePaddleR);
+    g->ball     = eshi_scene_entity(w, kNodeBall);
+    g->wall[0]  = eshi_scene_entity(w, kNodeWallTop);
+    g->wall[1]  = eshi_scene_entity(w, kNodeWallBottom);
+}
+
+EshiResult submit(EshiWorld* w, Game* g) {
+    uint32_t words[kSceneWords];
+    eshi::SceneWriter scene(words, kSceneWords);
+    describe(scene, g->epoch);
+
+    const EshiResult rc = scene.submit(w);
+    if (rc == ESHI_OK) bind(w, g);
+    return rc;
+}
+
+} /* namespace */
+
+/* ---------------------------------------------------------------------------
+ * Construction
+ * -------------------------------------------------------------------------*/
+void reload(EshiWorld* w, Game* g) {
+    g->epoch++;
+
+    /*
+     * ESHI_ERR_STALE is not a failure here — it is the epoch gate doing its job
+     * against a submission that lost a race, and the right response is to leave
+     * the live scene alone. Anything else is a malformed description.
+     */
+    const EshiResult rc = submit(w, g);
+    if (rc != ESHI_OK && rc != ESHI_ERR_STALE) {
+        std::fprintf(stderr, "pong: scene reload failed: %s\n", eshi_result_string(rc));
+    }
+}
+
 void build(EshiWorld* w, Game* g) {
     g->score_l = 0;
     g->score_r = 0;
     g->uniforms.hit_timer = 0.0f;
+    g->epoch = 1;
 
-    /* Paddles: collide with the ball, never displaced by it. */
-    g->paddle_l = eshi_entity_create(w);
-    eshi_transform_set(w, g->paddle_l, -kArenaX + 0.1f, 0.0f);
-    eshi_velocity_set(w, g->paddle_l, 0.0f, 0.0f);
-    eshi_collider_set(w, g->paddle_l, kPaddleHalfW, kPaddleHalfH,
-                      kLayerPaddle, kLayerBall, ESHI_COLLIDER_STATIC);
-    eshi_bounds_set(w, g->paddle_l,
-                    -kArenaX + 0.1f, -kArenaX + 0.1f,
-                    -kArenaY + kPaddleHalfH, kArenaY - kPaddleHalfH);
-
-    g->paddle_r = eshi_entity_create(w);
-    eshi_transform_set(w, g->paddle_r, kArenaX - 0.1f, 0.0f);
-    eshi_velocity_set(w, g->paddle_r, 0.0f, 0.0f);
-    eshi_collider_set(w, g->paddle_r, kPaddleHalfW, kPaddleHalfH,
-                      kLayerPaddle, kLayerBall, ESHI_COLLIDER_STATIC);
-    eshi_bounds_set(w, g->paddle_r,
-                    kArenaX - 0.1f, kArenaX - 0.1f,
-                    -kArenaY + kPaddleHalfH, kArenaY - kPaddleHalfH);
-
-    /* Ball. */
-    g->ball = eshi_entity_create(w);
-    eshi_collider_set(w, g->ball, kBallRadius, kBallRadius,
-                      kLayerBall, kLayerPaddle | kLayerWall, ESHI_COLLIDER_NONE);
-    eshi_collider_set_restitution(w, g->ball, 1.0f);
-
-    /* Top and bottom walls are ordinary static colliders, not an `if` in the loop. */
-    const float wall_y[2] = { kArenaY + 0.1f, -kArenaY - 0.1f };
-    for (int i = 0; i < 2; ++i) {
-        g->wall[i] = eshi_entity_create(w);
-        eshi_transform_set(w, g->wall[i], 0.0f, wall_y[i]);
-        eshi_collider_set(w, g->wall[i], kArenaX + 1.0f, 0.1f,
-                          kLayerWall, kLayerBall, ESHI_COLLIDER_STATIC);
+    /*
+     * A refused first submission leaves every handle null, and the symptom is a
+     * game that renders and simulates nothing rather than one that crashes. Say
+     * so here instead of letting it read as a physics bug.
+     */
+    const EshiResult rc = submit(w, g);
+    if (rc != ESHI_OK) {
+        std::fprintf(stderr, "pong: scene submission failed: %s\n", eshi_result_string(rc));
     }
 
     serve(w, g, 1.0f);

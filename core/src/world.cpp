@@ -149,6 +149,9 @@ struct EshiWorld {
 
     EshiMaterial material;
 
+    /* Owned here, defined by scene.cpp, lazily built on first command. */
+    EshiSceneState* scene;
+
     const EshiBackendVTable* backend_vtable;
     EshiBackend*             backend;
 
@@ -347,6 +350,7 @@ extern "C" const char* eshi_result_string(EshiResult r) {
         case ESHI_ERR_UNSUPPORTED: return "unsupported grade or feature";
         case ESHI_ERR_NOMEM:       return "out of memory";
         case ESHI_ERR_LIMIT:       return "capacity exhausted";
+        case ESHI_ERR_STALE:       return "scene older than the world's epoch";
     }
     return "unknown";
 }
@@ -395,6 +399,7 @@ extern "C" EshiWorld* eshi_world_create(const EshiConfig* in_cfg) {
 
     w->backend_vtable = vtable;
     w->backend = NULL;
+    w->scene = NULL;
 
     w->cfg = cfg;
     w->generation.assign(cfg.max_entities + 1, 0);
@@ -426,7 +431,17 @@ extern "C" EshiWorld* eshi_world_create(const EshiConfig* in_cfg) {
 extern "C" void eshi_world_destroy(EshiWorld* w) {
     if (!w) return;
     if (w->backend && w->backend_vtable) w->backend_vtable->destroy(w->backend);
+    eshi__scene_destroy(w->scene);
     delete w;
+}
+
+/*
+ * The reconciler keeps its table here rather than in a container of its own, so
+ * a world still owns everything a world created. It gets the slot and nothing
+ * else — every entity it touches goes through the public API.
+ */
+extern "C" EshiSceneState** eshi__world_scene(EshiWorld* w) {
+    return w ? &w->scene : NULL;
 }
 
 extern "C" EshiGrade eshi_world_grade(const EshiWorld* w) {
@@ -645,6 +660,12 @@ extern "C" int32_t eshi_collisions_poll(EshiWorld* w, EshiCollisionEvent* out, i
     const int32_t n = (int32_t)w->collisions.size() < max ? (int32_t)w->collisions.size() : max;
     for (int32_t i = 0; i < n; ++i) out[i] = w->collisions[(size_t)i];
     return n;
+}
+
+extern "C" const EshiCollisionEvent* eshi__collisions(const EshiWorld* w, int32_t* out_count) {
+    if (out_count) *out_count = w ? (int32_t)w->collisions.size() : 0;
+    if (!w || w->collisions.empty()) return NULL;
+    return &w->collisions[0];
 }
 
 /* ===========================================================================

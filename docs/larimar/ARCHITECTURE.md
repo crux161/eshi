@@ -1,7 +1,7 @@
 # Larimar — Engineering Architecture
 
-> Status: active implementation. Phases 0, 1a, and Filament First Light are
-> landed on branch `feat/larimar`.
+> Status: active implementation. Phases 0, 1a, Filament First Light, and the
+> native half of Phase 3 are landed on branch `feat/larimar`.
 > Companion to [PROPOSAL.md](PROPOSAL.md), which records the original vision
 > unedited. This document is the continuation of that proposal with the Gyosho
 > monorepo (S2L / SumiC / Hanga) factored in, and it states plainly where the
@@ -253,6 +253,7 @@ eshi/                          # host apps, gallery, First Light games
     src/ecs/                   #   SoA storage, entity ids, systems
     src/render/ink/            #   CPU/OpenMP backend (today's renderer_cpu.h)
     src/render/filament/       #   Paper/Brush/Gold backend
+    src/scene.cpp              #   command transport + retained reconciler (§6.6, §6.7)
     src/scene/                 #   gltfio ingest, extras → colliders
   hosts/
     sdl/                       # standalone desktop host (SDL3)
@@ -313,7 +314,8 @@ Phase 4's hand-rolled parser duplicates it. **Keep the custom half** — reading
 `trigger_door` out of `extras`, synthesising invisible colliders, routing events
 back over FFI — and drop the parser.
 
-**6.6 — Hot reload is the hard part and Phase 3 underestimates it.** Dart hot
+**6.6 — Hot reload is the hard part and Phase 3 underestimates it.** *(Landed;
+see Phase 3 below.)* Dart hot
 reload re-executes `build()`; it does **not** unwind native state. Imperative
 scene construction (`eshi_create_entity()` in `initState`) means a reload leaves
 the old entities alive and creates a *second set*. Every reload doubles the
@@ -324,7 +326,8 @@ This is Flutter's own Widget→Element→RenderObject model applied across FFI �
 is a good sign it's the right shape, and a warning about how much machinery it is.
 Budget it as a first-class subsystem, not a Phase 3 bullet.
 
-**6.7 — Per-entity FFI calls per frame will eat the data-oriented win.** A
+**6.7 — Per-entity FFI calls per frame will eat the data-oriented win.**
+*(Landed; see Phase 3 below.)* A
 `dart:ffi` leaf call is cheap but not free, and thousands per frame plus the
 attendant GC pressure is exactly the cache-and-overhead problem Phase 2 set out
 to solve. **Use a shared command buffer**: allocate native memory once, expose it
@@ -390,12 +393,12 @@ Built on this branch. `zig build larimar && zig build test`.
 | System scheduler, deterministic ordering | `core/src/world.cpp` | Done — ascending order, registration tie-break |
 | Generic AABB collision + event queue | `core/src/world.cpp` | Done — layers/masks, restitution, static bodies |
 | Fixed timestep + seeded RNG | `core/src/world.cpp` | Done — clamped catch-up, splitmix64 |
-| **Ink** backend | `core/src/render_ink.cpp` | Done — OpenMP fullscreen material |
+| **Ink** backend | `core/src/render/ink.cpp` | Done — OpenMP fullscreen material |
 | C++ shader authoring layer | `core/include/eshi/shader.hpp` | Done — adapts `mainImage` to the C ABI |
 | SDL host | `hosts/sdl/host_sdl.cpp` | Done — live, headless encode, `--hash` |
 | Pong as a game | `examples/pong/` | Done — see §8 |
-| Core tests | `core/tests/test_core.cpp` | Done — 38 checks passing |
-| Command ring buffer (§6.7) | — | **Deferred to Phase 3**, where Dart is the first real consumer |
+| Core tests | `core/tests/test_core.cpp` | Done — 132 checks passing |
+| Command ring buffer (§6.7) | `core/src/scene.cpp` | Landed later, in Phase 3's native half |
 
 Two things worth recording from the build:
 
@@ -498,12 +501,67 @@ point's signature — a helper function cannot see it.
 
 ### Phase 2 — SDL3 + host hardening (§6.10)
 
-### Phase 3 — Dart
-- `ffigen` bindings from `eshi.h`.
-- Scene reconciler + epoch gating (§6.6) — the real work of this phase.
-- Flutter embedder + external texture, macOS first (§6.11).
-- ✅ Pong's paddle speed edited in Dart, hot-reloaded, no restart, no duplicate
-  entities.
+### Phase 3 — Dart — **native half landed**
+
+The two subsystems §6.6 and §6.7 describe are built, tested, and proven against
+Pong. They were built *before* Dart deliberately: both are testable in C++ with
+no Flutter, no `ffigen` and no embedder in the way, and building them first
+means the FFI contract is settled before the hardest dependency in the project
+gets a vote on its shape.
+
+| Piece | Where | State |
+|---|---|---|
+| Command wire format + decoder | `core/src/scene.cpp` | Done — `[opcode:16 \| payload_words:16]` framing, bounds-checked against a buffer another language wrote |
+| Shared command buffer (§6.7) | `core/src/scene.cpp` | Done — world-owned words, one `eshi_commands_flush()` per frame |
+| Retained scene reconciler (§6.6) | `core/src/scene.cpp` | Done — keyed nodes, change-gated writes, sweep on `SCENE_END` |
+| Epoch gating (§6.6) | `core/src/scene.cpp` | Done — a stale submission returns `ESHI_ERR_STALE` and sweeps nothing |
+| Bulk event drain (§6.7) | `core/src/scene.cpp` | Done — same framing in reverse; overflow reported, not truncated |
+| C++ encoder/decoder | `core/include/eshi/scene.hpp` | Done — header-only, and the executable spec of the format |
+| Pong on the reconciler | `examples/pong/pong.cpp` | Done — the scene is a description, not a sequence of `eshi_entity_create()` calls |
+| `ffigen` bindings from `eshi.h` | — | Not started |
+| Flutter embedder + external texture, macOS first (§6.11) | — | Not started |
+
+Four things came out of building it that were not obvious from §6.6.
+
+**Reconciling is not "apply the description."** The first working version wrote
+every described component on every pass. It never duplicated anything — and it
+was still useless, because a reload mid-rally teleported the ball back to its
+spawn point. Retained mode has to write a component *only when its described
+value changed*, which means the reconciler holds the previous description and
+diffs against it. That is precisely the role Flutter's Element tree plays
+between Widget and RenderObject, and skipping it produces something that is
+technically idempotent and practically unusable.
+
+**Described values are compared as raw words, not as floats.** Change detection
+on decoded floats gets both edges wrong: `NaN != NaN` re-fires a value that
+never changed, and `-0.0 == 0.0` hides one that did. Comparing the bytes the
+writer actually sent answers the question that is actually being asked — did
+the *description* change.
+
+**The reload proof is a digest, not an assertion.** `pong --hash --reload N`
+re-submits the whole scene description every N frames and must print the digest
+`pong --hash` prints. It does, at every cadence down to `--reload 1` — the
+entire scene re-described on every one of 400 frames, with the framebuffer
+unchanged bit for bit and `entities=5 nodes=5` throughout. The imperative build
+this replaced produces the same digests it always did, so the reconciler
+reproduces the old scene exactly rather than approximating it.
+
+**What is *not* in the description turned out to be the interesting part.** Pong
+describes the ball's collider and restitution but not its transform or velocity:
+those are simulation state owned by `serve()`. Declaring them would make the
+reconciler and the game argue over the ball every reload. The rule that fell out
+— *describe what the scene is, let systems own what it is doing* — is the one the
+Dart layer will have to follow too, and it is easier to state now than to
+retrofit once widgets are writing scene descriptions.
+
+One deliberate call worth flagging for review: an opcode the core does not
+implement stops the flush with `ESHI_ERR_UNSUPPORTED` rather than being skipped.
+The length field makes skipping *possible*, and skipping is the usual choice for
+a forward-compatible wire format. It is the wrong one here: a core that quietly
+drops an opcode its Dart package emits renders a scene that is wrong rather than
+one that is missing, and that surfaces as an art bug weeks later. Opcode-level
+compatibility is a version contract between the package and the core, not
+something to paper over at runtime.
 
 ### Phase 4 — SumiC retargets to Filament
 - `FilamentGenerator` in `sumic/src/codegen.rs`, emitting `.mat`.
@@ -539,14 +597,14 @@ Pong, with **zero engine code in the game**:
 - [ ] The same game source runs under **both** hosts — `hosts/sdl` and
       `hosts/flutter` — unmodified. *(Phase 3)*
 - [x] …and on Filament. *(Phase 1b First Light)*
-- [ ] Editing paddle speed in Dart and hot-reloading changes it live, and the
-      scene does **not** duplicate (§6.6). *(Phase 3)*
+- [x] Re-submitting the scene description mid-rally changes nothing and does
+      **not** duplicate the scene (§6.6) — `pong --hash --reload 1` matches
+      `pong --hash` bit for bit at `entities=5 nodes=5`.
+- [ ] …and the submission comes from Dart, edited and hot-reloaded rather than
+      re-run by the host. *(Phase 3, remaining half)*
 
-The last checkbox in the "still build and render" line is the regression gate
-for the whole project. If a phase breaks the gallery, the phase is wrong.
-
-That last checkbox is the regression gate for the whole project. If a phase
-breaks the gallery, the phase is wrong.
+The "all 20 gallery examples still build and render" checkbox is the regression
+gate for the whole project. If a phase breaks the gallery, the phase is wrong.
 
 ---
 
@@ -586,9 +644,15 @@ Still open, before Phase 1:
 
 Recorded so they read as decisions rather than oversights:
 
-- **No command ring buffer.** §6.7 stands, but the first real consumer is Dart
+- **No command ring buffer.** ~~§6.7 stands, but the first real consumer is Dart
   in Phase 3. Building the bulk-transfer path before anything crosses a language
-  boundary would be speculative; the C API is already shaped to accept it.
+  boundary would be speculative; the C API is already shaped to accept it.~~
+  **Reversed.** It was built in Phase 3's native half instead, and the reasoning
+  above was half wrong: the transport is indeed speculative until Dart exists,
+  but the *reconciler* on top of it is not — it is testable, and worth testing,
+  with no language boundary anywhere near it. Waiting for Dart would have meant
+  discovering the change-detection requirement (Phase 3, first note) with a
+  Flutter embedder already built on top of the wrong shape.
 - **The gallery was not moved onto the core.** The 20 shadertoy examples still
   run through the original `main.cpp`. Both paths build and neither can break
   the other. Merging them is Phase 1 work, once Filament defines what the
