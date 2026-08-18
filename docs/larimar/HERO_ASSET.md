@@ -83,7 +83,21 @@ lit surface material fills in a different part of `MaterialInputs` and may need
 subset rules the gallery never exercised. Anything the subset cannot express
 must fail at compile time with a diagnostic, not degrade into a flat surface.
 
-### Stage 3 — Rotation in the core
+### Stage 3 — Motion in the core
+
+*(Intro choreography landed as `eshi_asset_instance_track`.)* The intro is not a
+spin: a constant rate shows the back of the stone half the time and arrives
+nowhere. It is a one-pass track across the soundtrack — reveal at a distance and
+turned away, rise and turn to face, settle, then land on a tilted three-quarter
+pose — declared once from Dart and played by the renderer, so the per-frame FFI
+cost of a choreographed intro is still zero. The numbers were art-directed
+against headless renders (`pong --asset --asset-track --dump`), which is the
+only way to iterate on a pose without a person watching a window.
+
+An `AngularVelocity` ECS component remains Step 8 work; a pose track is the
+renderer's own scheduling, not a simulation component.
+
+### Stage 3b — Rotation in the ECS
 
 - Define an `AngularVelocity` POD component.
 - Integrate it against the fixed timestep in a pure system, writing the rotation
@@ -109,7 +123,7 @@ per frame while it turns.
 |---|---|---|
 | glTF pipeline | `resources/larimar-model.glb` loaded and instantiated by Dart | Prototype complete |
 | Custom material | Caustic material compiled and bound | Unstarted |
-| Native motion | One-time `spinY` declaration; general `AngularVelocity` ECS | Prototype complete; ECS remains |
+| Native motion | A declared pose track played by the renderer; general `AngularVelocity` ECS | Intro choreography complete; ECS remains |
 | Composition | Transparent Filament `EshiView` under Flutter UI | Prototype complete |
 
 The prototype also loops `resources/larimar-official.mp3` in the Flutter host.

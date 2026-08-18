@@ -95,6 +95,7 @@ const EshiBackendVTable kInkVTable = {
     NULL,
     NULL,
     NULL,
+    NULL,
 };
 
 } /* namespace */

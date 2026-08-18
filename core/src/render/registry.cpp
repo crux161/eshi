@@ -37,6 +37,7 @@ const EshiBackendVTable kStubVTable = {
     NULL,
     NULL,
     NULL,
+    NULL,
 };
 
 } /* namespace */

@@ -45,7 +45,7 @@ extern "C" {
 #define ESHI_ABI_VERSION_MINOR_OF(version) (((uint32_t)(version) >> 16) & 0xFFu)
 #define ESHI_ABI_VERSION_PATCH_OF(version) (((uint32_t)(version) >> 8) & 0xFFu)
 
-#define ESHI_ABI_VERSION              ESHI_ABI_VERSION_PACK(1, 1, 0)
+#define ESHI_ABI_VERSION              ESHI_ABI_VERSION_PACK(1, 2, 0)
 #define ESHI_COMMAND_PROTOCOL_VERSION 1u
 #define ESHI_EVENT_PROTOCOL_VERSION   1u
 
@@ -136,6 +136,14 @@ typedef struct EshiAbiInfo {
     uint32_t material_package_path_offset;
     uint32_t material_uniform_data_offset;
     uint32_t material_uniform_size_offset;
+
+    uint32_t asset_key_size;
+    uint32_t asset_key_alignment;
+    uint32_t asset_key_seconds_offset;
+    uint32_t asset_key_yaw_offset;
+    uint32_t asset_key_pitch_offset;
+    uint32_t asset_key_scale_offset;
+    uint32_t max_asset_keys;
 } EshiAbiInfo;
 
 /**
@@ -639,6 +647,41 @@ EshiResult eshi_asset_instance(EshiWorld* w, EshiAsset asset,
 EshiResult eshi_asset_instance_animated(EshiWorld* w, EshiAsset asset,
                                         float x, float y, float z, float scale,
                                         float radians_per_second);
+
+/**
+ * One key in a declared pose track.
+ *
+ * `seconds` is measured from the instant the track was declared. Between keys
+ * the renderer interpolates with a smoothstep, and after the last key it holds
+ * that pose — an intro that ends still is the common case, and a track that
+ * silently restarted would be the surprising one.
+ */
+typedef struct EshiAssetKey {
+    float seconds; /**< Time from declaration. Keys must be non-decreasing. */
+    float yaw;     /**< Radians about glTF's Y-up axis. */
+    float pitch;   /**< Radians about X, applied after yaw. */
+    float scale;   /**< Uniform, and must be greater than zero. */
+} EshiAssetKey;
+
+/** Keys one instance may carry. Beyond this the declaration is refused. */
+#define ESHI_MAX_ASSET_KEYS 8u
+
+/**
+ * Places an instance that plays a declared pose track.
+ *
+ * This is the choreographed cousin of eshi_asset_instance_animated: instead of
+ * one rate integrated forever, the host declares where the asset should be at
+ * a handful of times and the renderer plays it. The point is the same — the
+ * declaration crosses the boundary once, and no per-frame traffic follows it —
+ * but a track can hold still at the end, which a rate cannot.
+ *
+ * Returns ESHI_ERR_INVALID for an empty track, a non-finite or out-of-order
+ * key, or a non-positive scale, and ESHI_ERR_LIMIT above
+ * ESHI_MAX_ASSET_KEYS.
+ */
+EshiResult eshi_asset_instance_track(EshiWorld* w, EshiAsset asset,
+                                     float x, float y, float z,
+                                     const EshiAssetKey* keys, uint32_t key_count);
 
 /**
  * Releases an asset and every instance of it.

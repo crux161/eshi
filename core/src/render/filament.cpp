@@ -66,6 +66,17 @@ struct AssetPlacement {
     float z;
     float scale;
     float radians_per_second;
+
+    /*
+     * A declared pose track, played once and then held. `key_count == 0` means
+     * this placement uses the continuous spin above instead; the two are
+     * alternatives rather than layers, because a pose that is also spinning is
+     * not a pose.
+     */
+    EshiAssetKey keys[ESHI_MAX_ASSET_KEYS];
+    uint32_t key_count;
+    float start_time;
+    bool started;
 };
 
 /** One loaded glTF, its reserved instances, and how many are in the scene. */
@@ -500,7 +511,12 @@ EshiResult filament_asset_instance(EshiBackend* handle, uint32_t asset,
     if (!instance) return ESHI_ERR_INVALID;
     const size_t placement_index = slot->used;
     slot->used += 1;
-    slot->placements[placement_index] = {x, y, z, scale, radians_per_second};
+    slot->placements[placement_index] = AssetPlacement{};
+    slot->placements[placement_index].x = x;
+    slot->placements[placement_index].y = y;
+    slot->placements[placement_index].z = z;
+    slot->placements[placement_index].scale = scale;
+    slot->placements[placement_index].radians_per_second = radians_per_second;
 
     filament::TransformManager& transforms = backend->engine->getTransformManager();
     const filament::TransformManager::Instance root =
@@ -515,13 +531,69 @@ EshiResult filament_asset_instance(EshiBackend* handle, uint32_t asset,
     return ESHI_OK;
 }
 
+/** Smoothstep, which is what makes a two-key track land softly rather than stop. */
+float ease(float t) {
+    if (t <= 0.0f) return 0.0f;
+    if (t >= 1.0f) return 1.0f;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+/**
+ * The pose at `elapsed` seconds into a track: interpolated between the
+ * surrounding keys, clamped to the first before it starts and held on the last
+ * after it ends.
+ */
+void pose_at(const AssetPlacement& placement, float elapsed, float* out_yaw, float* out_pitch,
+             float* out_scale) {
+    const EshiAssetKey* keys = placement.keys;
+    const uint32_t count = placement.key_count;
+    if (elapsed <= keys[0].seconds) {
+        *out_yaw = keys[0].yaw;
+        *out_pitch = keys[0].pitch;
+        *out_scale = keys[0].scale;
+        return;
+    }
+    for (uint32_t i = 1; i < count; ++i) {
+        if (elapsed > keys[i].seconds) continue;
+        const float span = keys[i].seconds - keys[i - 1].seconds;
+        const float t = span > 0.0f ? ease((elapsed - keys[i - 1].seconds) / span) : 1.0f;
+        *out_yaw = keys[i - 1].yaw + (keys[i].yaw - keys[i - 1].yaw) * t;
+        *out_pitch = keys[i - 1].pitch + (keys[i].pitch - keys[i - 1].pitch) * t;
+        *out_scale = keys[i - 1].scale + (keys[i].scale - keys[i - 1].scale) * t;
+        return;
+    }
+    *out_yaw = keys[count - 1].yaw;
+    *out_pitch = keys[count - 1].pitch;
+    *out_scale = keys[count - 1].scale;
+}
+
 void animate_asset_instances(FilamentBackend* backend, float time) {
     filament::TransformManager& transforms = backend->engine->getTransformManager();
     for (AssetSlot& slot : backend->assets) {
         for (size_t i = 0; i < slot.used; ++i) {
             filament::gltfio::FilamentInstance* instance = slot.instances[i];
             if (!instance) continue;
-            const AssetPlacement& placement = slot.placements[i];
+            AssetPlacement& placement = slot.placements[i];
+
+            float yaw = 0.0f;
+            float pitch = 0.0f;
+            float scale = placement.scale;
+            if (placement.key_count > 0) {
+                /*
+                 * Timed from the first frame the instance is drawn rather than
+                 * from declaration: a track declared while the host was still
+                 * loading its audio would otherwise be part-finished before
+                 * anybody saw it.
+                 */
+                if (!placement.started) {
+                    placement.started = true;
+                    placement.start_time = time;
+                }
+                pose_at(placement, time - placement.start_time, &yaw, &pitch, &scale);
+            } else {
+                yaw = time * placement.radians_per_second;
+            }
+
             const filament::TransformManager::Instance root =
                     transforms.getInstance(instance->getRoot());
             transforms.setTransform(
@@ -529,11 +601,34 @@ void animate_asset_instances(FilamentBackend* backend, float time) {
                     filament::math::mat4f::translation(
                             filament::math::float3{placement.x, placement.y, placement.z}) *
                     filament::math::mat4f::rotation(
-                            time * placement.radians_per_second,
-                            filament::math::float3{0.0f, 1.0f, 0.0f}) *
-                    filament::math::mat4f::scaling(placement.scale));
+                            yaw, filament::math::float3{0.0f, 1.0f, 0.0f}) *
+                    filament::math::mat4f::rotation(
+                            pitch, filament::math::float3{1.0f, 0.0f, 0.0f}) *
+                    filament::math::mat4f::scaling(scale));
         }
     }
+}
+
+EshiResult filament_asset_instance_track(EshiBackend* handle, uint32_t asset,
+                                         float x, float y, float z,
+                                         const EshiAssetKey* keys, uint32_t key_count) {
+    /*
+     * The first key positions the instance, so a track is placed with the pose
+     * it starts in rather than at identity — otherwise the first frame shows
+     * the asset unrotated for exactly one frame, which reads as a flicker.
+     */
+    const EshiResult placed = filament_asset_instance(handle, asset, x, y, z, keys[0].scale, 0.0f);
+    if (placed != ESHI_OK) return placed;
+
+    FilamentBackend* backend = reinterpret_cast<FilamentBackend*>(handle);
+    AssetSlot* slot = find_asset(backend, asset);
+    if (!slot || slot->used == 0) return ESHI_ERR_INVALID;
+    AssetPlacement& placement = slot->placements[slot->used - 1];
+    for (uint32_t i = 0; i < key_count; ++i) placement.keys[i] = keys[i];
+    placement.key_count = key_count;
+    placement.started = false;
+    placement.start_time = 0.0f;
+    return ESHI_OK;
 }
 
 EshiResult filament_asset_release(EshiBackend* handle, uint32_t asset) {
@@ -696,6 +791,7 @@ const EshiBackendVTable kFilamentVTable = {
         filament_render,
         filament_render_texture,
         filament_asset_load,
+        filament_asset_instance_track,
         filament_asset_instance,
         filament_asset_release,
         filament_asset_count,

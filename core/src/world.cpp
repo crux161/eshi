@@ -841,6 +841,50 @@ extern "C" EshiResult eshi_asset_instance_animated(EshiWorld* w, EshiAsset asset
     }
 }
 
+extern "C" EshiResult eshi_asset_instance_track(EshiWorld* w, EshiAsset asset,
+                                               float x, float y, float z,
+                                               const EshiAssetKey* keys,
+                                               uint32_t key_count) {
+    if (!w || asset == 0 || !keys || key_count == 0) return ESHI_ERR_INVALID;
+    if (key_count > ESHI_MAX_ASSET_KEYS) return ESHI_ERR_LIMIT;
+
+    /*
+     * Validated here rather than in the renderer, because a malformed track is
+     * a caller mistake and the answer should not depend on which backend is
+     * loaded. Out-of-order keys are the interesting case: the renderer would
+     * still interpolate something, and that something would be an asset that
+     * jumps backwards mid-intro for no visible reason.
+     */
+    float previous = keys[0].seconds;
+    for (uint32_t i = 0; i < key_count; ++i) {
+        const EshiAssetKey& key = keys[i];
+        if (!std::isfinite(key.seconds) || !std::isfinite(key.yaw) ||
+            !std::isfinite(key.pitch) || !std::isfinite(key.scale)) {
+            return ESHI_ERR_INVALID;
+        }
+        if (key.scale <= 0.0f) return ESHI_ERR_INVALID;
+        if (key.seconds < previous) return ESHI_ERR_INVALID;
+        previous = key.seconds;
+    }
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return ESHI_ERR_INVALID;
+
+    /*
+     * Capability last. A malformed track is a caller mistake on every tier, so
+     * answering "unsupported" to it would send a reader looking for a missing
+     * backend instead of at their own keys.
+     */
+    if (!w->backend || !w->backend_vtable->asset_instance_track) return ESHI_ERR_UNSUPPORTED;
+
+    try {
+        return w->backend_vtable->asset_instance_track(w->backend, asset, x, y, z,
+                                                       keys, key_count);
+    } catch (const std::bad_alloc&) {
+        return ESHI_ERR_NOMEM;
+    } catch (...) {
+        return ESHI_ERR_INVALID;
+    }
+}
+
 extern "C" EshiResult eshi_asset_release(EshiWorld* w, EshiAsset asset) {
     if (!w || asset == 0) return ESHI_ERR_INVALID;
     if (!w->backend || !w->backend_vtable->asset_release) return ESHI_ERR_UNSUPPORTED;

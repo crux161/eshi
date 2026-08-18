@@ -13,6 +13,9 @@
 - Add `MacOSEshiViewHost.captureSurface()`, which reads a view's surface back to
   a PNG without going through the compositor.
 - Flush the Metal texture cache when a view's surface is deallocated.
+- Add `LarimarAsset.instantiateTrack` and `LarimarPose`: a declared pose track
+  the renderer plays once and holds, for intros that arrive somewhere instead
+  of spinning forever. ABI 1.2.0.
 
 ## 0.1.0-dev.1
 

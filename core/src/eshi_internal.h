@@ -100,6 +100,11 @@ struct EshiBackendVTable {
     EshiResult (*asset_load)(EshiBackend* backend, const char* path,
                              uint32_t* out_asset);
 
+    /** Adds one instance that plays a declared pose track. */
+    EshiResult (*asset_instance_track)(EshiBackend* backend, uint32_t asset,
+                                       float x, float y, float z,
+                                       const EshiAssetKey* keys, uint32_t key_count);
+
     /** Adds one instance of a loaded asset to the backend's scene. */
     EshiResult (*asset_instance)(EshiBackend* backend, uint32_t asset,
                                  float x, float y, float z, float scale,

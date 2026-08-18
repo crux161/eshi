@@ -235,6 +235,7 @@ const EshiBackendVTable kMetalVTable = {
     NULL,
     NULL,
     NULL,
+    NULL,
 };
 
 } /* namespace */

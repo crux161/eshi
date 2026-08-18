@@ -138,6 +138,13 @@ void print_usage(const char* argv0) {
         "  --asset-instances N  Copies of the asset to place. Zero loads it and\n"
         "               places none, which is how a test tells a drawn frame from\n"
         "               a cleared one. Default 1.\n"
+        "  --asset-offset X,Y,Z  Where to place the instance. Model pivots are\n"
+        "               rarely the visual centre, so framing is a placement\n"
+        "               decision rather than a camera one.\n"
+        "  --asset-track T  Declare a pose track instead of a spin, as\n"
+        "               'seconds,yaw,pitch,scale;...' in degrees. The renderer\n"
+        "               plays it once and holds the last pose, so a headless\n"
+        "               dump shows exactly what an intro will look like.\n"
         "  --gallery    Run the ripple gallery shader instead of pong. Required\n"
         "               for the GPU tiers, which cannot execute pong's typed\n"
         "               uniform struct.\n",
@@ -156,6 +163,8 @@ int main(int argc, char** argv) {
     bool        gallery = false;
     const char* asset_path = NULL;
     int         asset_instances = 1;
+    const char* asset_track = NULL;
+    float       asset_offset[3] = {0.0f, 0.0f, 0.0f};
     std::string dump_dir;
     EncoderBackend encoder_backend = EncoderBackend::Auto;
     EshiGrade   grade = ESHI_GRADE_INK;
@@ -201,6 +210,11 @@ int main(int argc, char** argv) {
             asset_path = argv[++i];
         } else if (arg == "--asset-instances" && i + 1 < argc) {
             asset_instances = std::atoi(argv[++i]);
+        } else if (arg == "--asset-track" && i + 1 < argc) {
+            asset_track = argv[++i];
+        } else if (arg == "--asset-offset" && i + 1 < argc) {
+            std::sscanf(argv[++i], "%f,%f,%f", &asset_offset[0], &asset_offset[1],
+                        &asset_offset[2]);
         } else if (arg == "--grade" && i + 1 < argc) {
             bool ok = false;
             grade = parse_grade(argv[++i], &ok);
@@ -288,6 +302,42 @@ int main(int argc, char** argv) {
             eshi_world_destroy(world);
             return 1;
         }
+        if (asset_track) {
+            EshiAssetKey keys[ESHI_MAX_ASSET_KEYS];
+            uint32_t key_count = 0;
+            const char* cursor = asset_track;
+            while (*cursor && key_count < ESHI_MAX_ASSET_KEYS) {
+                float seconds = 0, yaw = 0, pitch = 0, scale = 1;
+                int consumed = 0;
+                if (std::sscanf(cursor, "%f,%f,%f,%f%n", &seconds, &yaw, &pitch, &scale,
+                                &consumed) != 4) {
+                    std::fprintf(stderr,
+                                 "--asset-track expects 'seconds,yaw,pitch,scale' groups "
+                                 "separated by ';'\n");
+                    eshi_world_destroy(world);
+                    return 1;
+                }
+                const float to_radians = 3.14159265358979323846f / 180.0f;
+                keys[key_count].seconds = seconds;
+                keys[key_count].yaw = yaw * to_radians;
+                keys[key_count].pitch = pitch * to_radians;
+                keys[key_count].scale = scale;
+                key_count += 1;
+                cursor += consumed;
+                if (*cursor == ';') cursor += 1;
+            }
+            const EshiResult rc_track =
+                    eshi_asset_instance_track(world, asset, asset_offset[0], asset_offset[1],
+                                              asset_offset[2], keys, key_count);
+            if (rc_track != ESHI_OK) {
+                std::fprintf(stderr, "eshi_asset_instance_track failed: %s\n",
+                             eshi_result_string(rc_track));
+                eshi_world_destroy(world);
+                return 1;
+            }
+            std::printf("[eshi/host] asset=%s track=%u keys assets=%u\n", asset_path,
+                        key_count, eshi_asset_count(world));
+        } else
         for (int instance = 0; instance < asset_instances; ++instance) {
             /* Spread copies along X so a second one is visibly a second one. */
             const float offset = (float)instance * 1.1f - (float)(asset_instances - 1) * 0.55f;

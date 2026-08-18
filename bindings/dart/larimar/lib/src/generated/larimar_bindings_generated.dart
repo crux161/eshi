@@ -130,6 +130,52 @@ EshiResult eshi_asset_instance_animated(
   );
 }
 
+/// Places an instance that plays a declared pose track.
+///
+/// This is the choreographed cousin of eshi_asset_instance_animated: instead of
+/// one rate integrated forever, the host declares where the asset should be at
+/// a handful of times and the renderer plays it. The point is the same — the
+/// declaration crosses the boundary once, and no per-frame traffic follows it —
+/// but a track can hold still at the end, which a rate cannot.
+///
+/// Returns ESHI_ERR_INVALID for an empty track, a non-finite or out-of-order
+/// key, or a non-positive scale, and ESHI_ERR_LIMIT above
+/// ESHI_MAX_ASSET_KEYS.
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<EshiWorld>,
+    EshiAsset,
+    ffi.Float,
+    ffi.Float,
+    ffi.Float,
+    ffi.Pointer<EshiAssetKey>,
+    ffi.Uint32,
+  )
+>(symbol: 'eshi_asset_instance_track')
+external int _eshi_asset_instance_track(
+  ffi.Pointer<EshiWorld> w,
+  int asset,
+  double x,
+  double y,
+  double z,
+  ffi.Pointer<EshiAssetKey> keys,
+  int key_count,
+);
+
+EshiResult eshi_asset_instance_track(
+  ffi.Pointer<EshiWorld> w,
+  DartEshiAsset asset,
+  double x,
+  double y,
+  double z,
+  ffi.Pointer<EshiAssetKey> keys,
+  int key_count,
+) {
+  return EshiResult.fromValue(
+    _eshi_asset_instance_track(w, asset, x, y, z, keys, key_count),
+  );
+}
+
 /// Loads a glTF or GLB file for this world's backend.
 ///
 /// Loading is separate from instancing because the expensive half — parsing,
@@ -756,7 +802,7 @@ external void eshi_world_size(
   ffi.Pointer<ffi.Int32> out_h,
 );
 
-const int ESHI_ABI_VERSION = 16842752;
+const int ESHI_ABI_VERSION = 16908288;
 
 const int ESHI_COMMAND_PROTOCOL_VERSION = 1;
 
@@ -765,6 +811,8 @@ const int ESHI_ENTITY_GENERATION_BITS = 8;
 const int ESHI_ENTITY_INDEX_BITS = 17;
 
 const int ESHI_EVENT_PROTOCOL_VERSION = 1;
+
+const int ESHI_MAX_ASSET_KEYS = 8;
 
 const int ESHI_MAX_ENTITIES = 131071;
 
@@ -933,6 +981,27 @@ final class EshiAbiInfo extends ffi.Struct {
   @ffi.Uint32()
   external int material_uniform_size_offset;
 
+  @ffi.Uint32()
+  external int asset_key_size;
+
+  @ffi.Uint32()
+  external int asset_key_alignment;
+
+  @ffi.Uint32()
+  external int asset_key_seconds_offset;
+
+  @ffi.Uint32()
+  external int asset_key_yaw_offset;
+
+  @ffi.Uint32()
+  external int asset_key_pitch_offset;
+
+  @ffi.Uint32()
+  external int asset_key_scale_offset;
+
+  @ffi.Uint32()
+  external int max_asset_keys;
+
   static ffi.Pointer<EshiAbiInfo> $allocate(
     ffi.Allocator $allocator, {
     required int struct_size,
@@ -980,6 +1049,13 @@ final class EshiAbiInfo extends ffi.Struct {
     required int material_package_path_offset,
     required int material_uniform_data_offset,
     required int material_uniform_size_offset,
+    required int asset_key_size,
+    required int asset_key_alignment,
+    required int asset_key_seconds_offset,
+    required int asset_key_yaw_offset,
+    required int asset_key_pitch_offset,
+    required int asset_key_scale_offset,
+    required int max_asset_keys,
   }) => $allocator<EshiAbiInfo>()
     ..ref.struct_size = struct_size
     ..ref.abi_info_alignment = abi_info_alignment
@@ -1026,12 +1102,55 @@ final class EshiAbiInfo extends ffi.Struct {
     ..ref.material_source_path_offset = material_source_path_offset
     ..ref.material_package_path_offset = material_package_path_offset
     ..ref.material_uniform_data_offset = material_uniform_data_offset
-    ..ref.material_uniform_size_offset = material_uniform_size_offset;
+    ..ref.material_uniform_size_offset = material_uniform_size_offset
+    ..ref.asset_key_size = asset_key_size
+    ..ref.asset_key_alignment = asset_key_alignment
+    ..ref.asset_key_seconds_offset = asset_key_seconds_offset
+    ..ref.asset_key_yaw_offset = asset_key_yaw_offset
+    ..ref.asset_key_pitch_offset = asset_key_pitch_offset
+    ..ref.asset_key_scale_offset = asset_key_scale_offset
+    ..ref.max_asset_keys = max_asset_keys;
 }
 
 /// An asset the backend has loaded. Zero is "no asset".
 typedef EshiAsset = ffi.Uint32;
 typedef DartEshiAsset = int;
+
+/// One key in a declared pose track.
+///
+/// `seconds` is measured from the instant the track was declared. Between keys
+/// the renderer interpolates with a smoothstep, and after the last key it holds
+/// that pose — an intro that ends still is the common case, and a track that
+/// silently restarted would be the surprising one.
+final class EshiAssetKey extends ffi.Struct {
+  /// < Time from declaration. Keys must be non-decreasing.
+  @ffi.Float()
+  external double seconds;
+
+  /// < Radians about glTF's Y-up axis.
+  @ffi.Float()
+  external double yaw;
+
+  /// < Radians about X, applied after yaw.
+  @ffi.Float()
+  external double pitch;
+
+  /// < Uniform, and must be greater than zero.
+  @ffi.Float()
+  external double scale;
+
+  static ffi.Pointer<EshiAssetKey> $allocate(
+    ffi.Allocator $allocator, {
+    required double seconds,
+    required double yaw,
+    required double pitch,
+    required double scale,
+  }) => $allocator<EshiAssetKey>()
+    ..ref.seconds = seconds
+    ..ref.yaw = yaw
+    ..ref.pitch = pitch
+    ..ref.scale = scale;
+}
 
 /// Collider response flags.
 enum EshiColliderFlags {

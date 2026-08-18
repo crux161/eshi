@@ -66,6 +66,14 @@ EshiAbiInfo current_abi(void) {
     info.material_package_path_offset = (uint32_t)offsetof(EshiMaterial, package_path);
     info.material_uniform_data_offset = (uint32_t)offsetof(EshiMaterial, uniform_data);
     info.material_uniform_size_offset = (uint32_t)offsetof(EshiMaterial, uniform_size);
+
+    info.asset_key_size = (uint32_t)sizeof(EshiAssetKey);
+    info.asset_key_alignment = (uint32_t)alignof(EshiAssetKey);
+    info.asset_key_seconds_offset = (uint32_t)offsetof(EshiAssetKey, seconds);
+    info.asset_key_yaw_offset = (uint32_t)offsetof(EshiAssetKey, yaw);
+    info.asset_key_pitch_offset = (uint32_t)offsetof(EshiAssetKey, pitch);
+    info.asset_key_scale_offset = (uint32_t)offsetof(EshiAssetKey, scale);
+    info.max_asset_keys = ESHI_MAX_ASSET_KEYS;
     return info;
 }
 

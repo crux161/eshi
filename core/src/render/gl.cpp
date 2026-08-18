@@ -363,6 +363,7 @@ const EshiBackendVTable kGlVTable = {
     NULL,
     NULL,
     NULL,
+    NULL,
 };
 
 } /* namespace */

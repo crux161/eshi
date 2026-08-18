@@ -109,6 +109,15 @@ returns `ESHI_ERR_UNSUPPORTED`. A missing or unparsable file returns
 instances than the asset reserved returns `ESHI_ERR_LIMIT`. A failed load
 leaves the caller's handle untouched and the world renderable.
 
+An instance either spins at a declared rate or plays a declared pose track —
+never both, because a pose that is also spinning is not a pose. A track is at
+most `ESHI_MAX_ASSET_KEYS` keys of time, yaw, pitch and scale; the renderer
+interpolates between them with a smoothstep, holds the last one, and times the
+track from the first frame the instance is drawn rather than from the call, so
+a host that declares one while still loading audio does not start half-finished.
+Keys are validated before any backend sees them, so a malformed track is
+refused identically on every tier.
+
 Scene conventions are glTF's own: right-handed, Y up, metres. The backend
 installs a 45° vertical field of view, a photographic exposure, and one
 directional light at daylight intensity. Image-based lighting is not in yet,

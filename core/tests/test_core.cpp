@@ -150,6 +150,31 @@ void test_assets_on_a_backend_without_a_scene() {
           "releasing the null asset is refused");
     check(eshi_asset_count(NULL) == 0, "counting no world is zero, not a crash");
 
+    /*
+     * A pose track is validated before any backend sees it, so a malformed one
+     * is refused identically on every tier. Out-of-order keys matter most: a
+     * renderer would happily interpolate them, and the result is an intro that
+     * jumps backwards for no reason a reader could find.
+     */
+    EshiAssetKey ordered[2] = {{0.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}};
+    check(eshi_asset_instance_track(w, 1, 0, 0, 0, ordered, 2) == ESHI_ERR_UNSUPPORTED,
+          "a well-formed track still needs a backend with a scene");
+    check(eshi_asset_instance_track(w, 1, 0, 0, 0, ordered, 0) == ESHI_ERR_INVALID,
+          "an empty track is refused");
+    check(eshi_asset_instance_track(w, 1, 0, 0, 0, NULL, 2) == ESHI_ERR_INVALID,
+          "a track with no keys is refused");
+    check(eshi_asset_instance_track(w, 1, 0, 0, 0, ordered, ESHI_MAX_ASSET_KEYS + 1) ==
+                  ESHI_ERR_LIMIT,
+          "a track longer than the fixed capacity is a limit");
+
+    EshiAssetKey backwards[2] = {{1.0f, 0.0f, 0.0f, 1.0f}, {0.5f, 0.0f, 0.0f, 1.0f}};
+    check(eshi_asset_instance_track(w, 1, 0, 0, 0, backwards, 2) == ESHI_ERR_INVALID,
+          "keys that move backwards in time are refused");
+
+    EshiAssetKey flat[1] = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    check(eshi_asset_instance_track(w, 1, 0, 0, 0, flat, 1) == ESHI_ERR_INVALID,
+          "a zero scale is refused");
+
     eshi_world_destroy(w);
 }
 

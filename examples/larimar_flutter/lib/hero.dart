@@ -14,9 +14,12 @@ const _soundDuration = Duration(microseconds: 4544313);
 void main() => runApp(const LarimarBrandApp());
 
 class LarimarBrandApp extends StatelessWidget {
-  const LarimarBrandApp({super.key, this.testMode = false});
+  const LarimarBrandApp({super.key, this.testMode = false, this.phase = 0.48});
 
   final bool testMode;
+
+  /// Where in the sequence a widget test should freeze. Production plays it.
+  final double phase;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -31,14 +34,15 @@ class LarimarBrandApp extends StatelessWidget {
         surface: Color(0xff07131a),
       ),
     ),
-    home: _LarimarBrandHome(testMode: testMode),
+    home: _LarimarBrandHome(testMode: testMode, phase: phase),
   );
 }
 
 class _LarimarBrandHome extends StatefulWidget {
-  const _LarimarBrandHome({required this.testMode});
+  const _LarimarBrandHome({required this.testMode, required this.phase});
 
   final bool testMode;
+  final double phase;
 
   @override
   State<_LarimarBrandHome> createState() => _LarimarBrandHomeState();
@@ -58,7 +62,7 @@ class _LarimarBrandHomeState extends State<_LarimarBrandHome>
     super.initState();
     _sequence = AnimationController(vsync: this, duration: _soundDuration);
     if (widget.testMode) {
-      _sequence.value = 0.48;
+      _sequence.value = widget.phase;
     } else {
       unawaited(_initialize());
     }
@@ -76,10 +80,11 @@ class _LarimarBrandHomeState extends State<_LarimarBrandHome>
       if (!mounted) return;
 
       final soundtrack = await _stageSoundtrack();
-      await _audio.setReleaseMode(ReleaseMode.loop);
+      // An intro that loops is a screensaver. One pass, then it holds.
+      await _audio.setReleaseMode(ReleaseMode.stop);
       await _audio.setVolume(1);
       await _audio.play(DeviceFileSource(soundtrack.path));
-      _sequence.repeat(period: _soundDuration);
+      await _sequence.forward();
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
     }
@@ -113,6 +118,14 @@ class _LarimarBrandHomeState extends State<_LarimarBrandHome>
     }
     _session?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_LarimarBrandHome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.testMode && widget.phase != oldWidget.phase) {
+      _sequence.value = widget.phase;
+    }
   }
 
   @override
@@ -154,51 +167,97 @@ class _LarimarBrandHomeState extends State<_LarimarBrandHome>
     ),
   );
 
+  /// The moment each element earns its place on screen.
+  ///
+  /// A brand intro is a sequence of arrivals, not a static layout that fades
+  /// in together: the stone reveals alone, the name lands once the stone is
+  /// facing the viewer, and the line under it waits for the final pose. The
+  /// phases match the pose track declared in [_LarimarHeroSession].
+  static const _wordmarkAt = 0.30;
+  static const _taglineAt = 0.62;
+
   Widget _brandLockup({required bool vertical}) {
     final session = _session;
+    final phase = _sequence.value;
+
+    // The stone arrives out of the dark rather than being switched on.
+    final presence = Curves.easeOutCubic.transform(
+      (phase / 0.22).clamp(0.0, 1.0),
+    );
     final model = Semantics(
-      label: 'Larimar logo rotating gently',
+      label: 'The Larimar stone turning to face the viewer',
       image: true,
       child: SizedBox.square(
-        dimension: vertical ? 300 : 360,
+        dimension: vertical ? 300 : 380,
         child: session == null
-            ? Center(
-                child: SizedBox.square(
-                  dimension: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    color: Colors.white.withValues(alpha: 0.52),
-                  ),
+            ? const SizedBox.expand()
+            : Opacity(
+                opacity: presence,
+                child: EshiView(
+                  world: session.world,
+                  onFrame: session.frame,
+                  onError: (error) {
+                    if (mounted) setState(() => _error = error);
+                  },
+                  placeholder: const SizedBox.expand(),
                 ),
-              )
-            : EshiView(
-                world: session.world,
-                onFrame: session.frame,
-                onError: (error) {
-                  if (mounted) setState(() => _error = error);
-                },
-                placeholder: const SizedBox.expand(),
               ),
       ),
     );
-    const wordmark = _Wordmark();
 
-    if (vertical) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          model,
-          Transform.translate(offset: const Offset(0, -26), child: wordmark),
-        ],
-      );
-    }
-    return Row(
+    return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: <Widget>[
-        Flexible(child: model),
-        const SizedBox(width: 8),
-        wordmark,
+        model,
+        SizedBox(height: vertical ? 4 : 10),
+        _Reveal(
+          phase: phase,
+          from: _wordmarkAt,
+          span: 0.20,
+          rise: 26,
+          child: const _Wordmark(),
+        ),
+        const SizedBox(height: 20),
+        _Reveal(
+          phase: phase,
+          from: _taglineAt,
+          span: 0.24,
+          rise: 12,
+          child: const _Tagline(),
+        ),
       ],
+    );
+  }
+}
+
+/// Fades and lifts a child into place across a slice of the sequence.
+class _Reveal extends StatelessWidget {
+  const _Reveal({
+    required this.phase,
+    required this.from,
+    required this.span,
+    required this.rise,
+    required this.child,
+  });
+
+  final double phase;
+  final double from;
+  final double span;
+  final double rise;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Curves.easeOutCubic.transform(
+      ((phase - from) / span).clamp(0.0, 1.0),
+    );
+    if (t <= 0) return Opacity(opacity: 0, child: child);
+    return Opacity(
+      opacity: t,
+      child: Transform.translate(
+        offset: Offset(0, (1 - t) * rise),
+        child: child,
+      ),
     );
   }
 }
@@ -219,7 +278,37 @@ final class _LarimarHeroSession {
     );
     try {
       final asset = await world.loadAssetBundle(_modelAsset);
-      asset.instantiate(scale: 0.86, spinY: 0.32);
+      /*
+       * Reveal, present, finish — one pass across the soundtrack, and never
+       * past a profile view. A continuous spin shows the back of the stone
+       * half the time and arrives nowhere; this arrives somewhere, and the
+       * renderer plays it without another word from Dart.
+       *
+       * The placement offset is here because the model's pivot is its
+       * pedestal, not its visual centre. The numbers were art-directed against
+       * headless renders: pong --asset-track, in scripts/check_asset_render.sh's
+       * neighbourhood.
+       */
+      asset.instantiateTrack(
+        x: -0.06,
+        y: -0.14,
+        keys: const <LarimarPose>[
+          LarimarPose(at: Duration.zero, yaw: -38, pitch: -17, scale: 0.56),
+          LarimarPose(
+            at: Duration(milliseconds: 1250),
+            yaw: -15,
+            pitch: -7,
+            scale: 0.76,
+          ),
+          LarimarPose(
+            at: Duration(milliseconds: 3050),
+            yaw: -2,
+            pitch: -3.5,
+            scale: 0.84,
+          ),
+          LarimarPose(at: _soundDuration, yaw: 13, pitch: -11, scale: 0.92),
+        ],
+      );
       return _LarimarHeroSession._(world: world, asset: asset);
     } on Object {
       world.dispose();
@@ -244,33 +333,34 @@ class _Wordmark extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Semantics(
     header: true,
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          'larimar',
-          key: const ValueKey<String>('larimar-wordmark'),
-          style: const TextStyle(
-            color: Color(0xfff5fbfb),
-            fontSize: 92,
-            height: 0.94,
-            fontWeight: FontWeight.w300,
-            letterSpacing: -4.8,
-          ),
-        ),
-        const SizedBox(height: 18),
-        Text(
-          'A GAME ENGINE IN MOTION',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.54),
-            fontSize: 11,
-            height: 1,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 3.35,
-          ),
-        ),
-      ],
+    child: Text(
+      'larimar',
+      key: const ValueKey<String>('larimar-wordmark'),
+      textAlign: TextAlign.center,
+      style: const TextStyle(
+        color: Color(0xfff5fbfb),
+        fontSize: 84,
+        height: 0.94,
+        fontWeight: FontWeight.w200,
+        letterSpacing: -3.4,
+      ),
+    ),
+  );
+}
+
+class _Tagline extends StatelessWidget {
+  const _Tagline();
+
+  @override
+  Widget build(BuildContext context) => Text(
+    'A GAME ENGINE IN MOTION',
+    textAlign: TextAlign.center,
+    style: TextStyle(
+      color: Colors.white.withValues(alpha: 0.46),
+      fontSize: 10.5,
+      height: 1,
+      fontWeight: FontWeight.w500,
+      letterSpacing: 4.2,
     ),
   );
 }
