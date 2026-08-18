@@ -18,6 +18,9 @@ zig-out/
 
 resources/filament/
 
+# Fetched distributions; scripts/vendor_filament.sh pins and verifies them.
+third_party/*/
+
 # --- Extras ---
 VENDORED
 sumi

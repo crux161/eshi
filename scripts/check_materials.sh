@@ -14,7 +14,8 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 matgen="$repository_root/zig-out/bin/eshi-matgen"
-filament_path="${FILAMENT_PATH:-$repository_root/resources/filament/out/release/filament}"
+# The pinned distribution scripts/vendor_filament.sh fetches.
+filament_path="${FILAMENT_PATH:-$repository_root/third_party/filament/v1.75.0}"
 matc="$filament_path/bin/matc"
 
 # Shaders the material domain cannot express, and why. Both refuse loudly with

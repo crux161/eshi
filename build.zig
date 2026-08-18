@@ -1,5 +1,9 @@
 const std = @import("std");
 
+/// Kept in step with scripts/vendor_filament.sh, which owns the checksums.
+const filament_version = "v1.75.0";
+const filament_default_path = "third_party/filament/" ++ filament_version;
+
 const example_sources = [_][]const u8{
     "examples/aurora.cpp",
     "examples/bubbles.cpp",
@@ -70,11 +74,16 @@ pub fn build(b: *std.Build) void {
         "filament",
         "Build Larimar's Filament backend (default: false)",
     ) orelse false;
+    // The pinned distribution, fetched and checksummed by
+    // scripts/vendor_filament.sh. The default is the vendored path rather than
+    // whatever Filament checkout happens to exist on the machine: a renderer
+    // that silently builds against a different version than the one its
+    // materials were compiled by is a debugging afternoon nobody needs.
     const filament_path = b.option(
         []const u8,
         "filament-path",
-        "Installed Filament distribution (default: resources/filament/out/release/filament)",
-    ) orelse "resources/filament/out/release/filament";
+        "Installed Filament distribution (default: " ++ filament_default_path ++ ")",
+    ) orelse filament_default_path;
     const filament_arch = b.option(
         []const u8,
         "filament-arch",

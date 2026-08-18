@@ -39,6 +39,24 @@ jobs:
       - name: Fetch libsumi
         run: ./scripts/vendor.sh
 
+      # Pinned by scripts/vendor_filament.sh and verified by checksum. Cached
+      # on the version, so an upgrade is a cache miss rather than a stale hit.
+      - name: Cache the Filament distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/filament
+          key: filament-${{ runner.os }}-v1.75.0
+
+      - name: Vendor Filament
+        run: ./scripts/vendor_filament.sh
+
+      # matc is a build-time tool, so this half of the material gate needs no
+      # GPU and runs on the Linux job as well as the macOS one.
+      - name: Compile a Filament material for every shader
+        run: |
+          zig build tools
+          ./scripts/check_materials.sh
+
       - name: Build with the OpenGL backend
         # This job gates the GPU/transpiler path. Keep the CPU OpenMP backend
         # out of this build so a runner's GCC runtime layout cannot prevent the
@@ -91,6 +109,15 @@ jobs:
       - name: Fetch libsumi
         run: ./scripts/vendor.sh
 
+      - name: Cache the Filament distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/filament
+          key: filament-${{ runner.os }}-v1.75.0
+
+      - name: Vendor Filament
+        run: ./scripts/vendor_filament.sh
+
       # Metal is on by default here and LTO is off by default on macOS, since
       # Zig's LLD cannot link Mach-O with it.
       - name: Build everything
@@ -126,12 +153,18 @@ jobs:
         if: steps.metal.outputs.available == 'true'
         run: ./scripts/check_tier_conformance.sh
 
-      # The .mat emitter, without Filament. matc lives in a distribution this
-      # job does not have yet — vendoring one is a Step 5 bullet — so this
-      # checks that every shader still produces a material and that the two
-      # documented refusals are still exactly the two.
-      - name: Emit a Filament material for every shader
+      # Every shader still produces a material, the two documented refusals are
+      # still exactly two, and matc accepts the other eighteen.
+      - name: Compile a Filament material for every shader
         run: ./scripts/check_materials.sh
+
+      # The Brush tier through Filament rather than direct Metal, from the same
+      # generated materials, against the same CPU reference.
+      - name: Filament and Ink agree to 1 LSB
+        if: steps.metal.outputs.available == 'true'
+        run: |
+          zig build larimar tools -Dfilament=true
+          ./scripts/check_tier_conformance.sh
 
       - name: Larimar core tests
         run: zig build test

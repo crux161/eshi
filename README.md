@@ -156,18 +156,22 @@ game owns only its scene, components, systems, and material while the SDL host
 and renderer remain interchangeable. Its Ink, Paper, and direct-Metal paths are
 built by `zig build larimar`.
 
-To run the same ECS-driven game through Google Filament, first install the
-vendored Filament distribution (one-time, incremental afterward), then enable
-the optional backend:
+To run the same ECS-driven game through Google Filament, fetch the pinned
+distribution once, then enable the optional backend:
 
 ```bash
-cd resources/filament
-./build.sh -i release filament matc
-cd ../..
-
+./scripts/vendor_filament.sh
 zig build larimar -Dfilament=true
 ./zig-out/bin/pong --grade brush --live
 ```
+
+The script downloads the official prebuilt release into
+`third_party/filament/<version>` and verifies its SHA-256 before extracting it,
+so an upgrade is a version and two checksums changed together in one commit.
+Filament is not built from source here: it is a large CMake project with its own
+toolchain expectations and would dominate this build. Attribution and the
+Apache-2.0 obligations are recorded in
+[`third_party/NOTICE.md`](third_party/NOTICE.md).
 
 The build generates each material from the shader source the other tiers
 already use — `eshi-matgen` emits a `.mat`, `matc` compiles it — and installs
@@ -179,9 +183,9 @@ those sources are written in, and the two gallery programs the material domain
 cannot express.
 
 Kantei Brush maps to Filament, and the public C API does not expose Filament
-types. To consume an already-installed distribution instead, pass
-`-Dfilament-path=/path/to/filament`; use `-Dfilament-arch=...` when its library
-directory is not the inferred `arm64` or `x86_64`.
+types. To build against a different distribution — a local source build, say —
+pass `-Dfilament-path=/path/to/filament`; use `-Dfilament-arch=...` when its
+library directory is not the inferred `arm64` or `x86_64`.
 
 Whether the tiers actually agree is a command rather than a claim:
 

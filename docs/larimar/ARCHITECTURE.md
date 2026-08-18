@@ -337,12 +337,15 @@ to Dart as a `Float32List`/`Int32List` via `asTypedList`, let Dart write packed
 commands into it, and cross the boundary **once** per frame with
 `eshi_flush(count)`. Same trick in reverse for the event queue. Bulk in, bulk out.
 
-**6.8 — Don't build Filament from source in-tree.** It is a large CMake project
-with its own toolchain expectations and would dominate the build. Consume the
-official per-platform prebuilt release archives via a fetch script following the
-existing `scripts/vendor.sh` pattern. License is Apache-2.0, compatible with
-eshi's MIT — but the NOTICE obligations are real and need a `third_party/`
-attribution file.
+**6.8 — Don't build Filament from source in-tree.** *(Landed;
+`scripts/vendor_filament.sh`.)* It is a large CMake project with its own
+toolchain expectations and would dominate the build. Consume the official
+per-platform prebuilt release archives via a fetch script following the existing
+`scripts/vendor.sh` pattern. License is Apache-2.0, compatible with eshi's MIT —
+but the NOTICE obligations are real and need a `third_party/` attribution file.
+The script pins v1.75.0 and verifies its SHA-256 before extracting; the checksum
+is what makes the pin mean anything, and the negative control is a different
+version's archive being refused rather than quietly installed.
 
 **6.9 — Terminology.** `matc` is the *compiler*; the input is a `.mat` file, the
 output is a `.filamat` package. "Output Filament's `matc` syntax" should read

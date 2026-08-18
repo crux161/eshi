@@ -229,21 +229,25 @@ count rising by two across the run. That number also covers the engine's own
 swapchain surfaces, so it cannot isolate the view's, and the in-process
 accounting above answers the question it was meant to answer.
 
-### Step 5 — Promote Filament First Light into a 3D scene backend
+### Step 5 — Promote Filament First Light into a 3D scene backend — **in progress**
 
 Dependency: Step 4.
 
-- Add renderable/mesh, camera, light, and asset handles to the internal backend
-  interface and command protocol without leaking Filament into the public ABI.
-- Use `gltfio` for glTF/GLB parsing and resource loading; use instancing rather
-  than duplicate asset uploads.
-- Establish PBR defaults, image-based lighting, color space, units, camera
+- [x] Vendor a pinned official Filament distribution with checksums and
+  Apache-2.0 NOTICE compliance; do not build Filament from source in ordinary
+  consumer builds. `scripts/vendor_filament.sh` fetches v1.75.0, verifies its
+  SHA-256, and extracts it to `third_party/filament/<version>`, which is now
+  `-Dfilament-path`'s default — a build cannot silently link a different
+  Filament than the one its materials were compiled by. Attribution lives in
+  [`third_party/NOTICE.md`](third_party/NOTICE.md).
+- [ ] Add renderable/mesh, camera, light, and asset handles to the internal
+  backend interface and command protocol without leaking Filament into the
+  public ABI.
+- [ ] Use `gltfio` for glTF/GLB parsing and resource loading; use instancing
+  rather than duplicate asset uploads.
+- [ ] Establish PBR defaults, image-based lighting, color space, units, camera
   convention, and deterministic asset failure behavior.
-- Vendor a pinned official Filament distribution with checksums and Apache-2.0
-  NOTICE compliance; do not build Filament from source in ordinary consumer
-  builds. Step 6a needs `matc` from that distribution and pulls the fetch script
-  forward.
-- Use the hero asset's greybox `.glb` (Step 8) as the reference asset rather
+- [ ] Use the hero asset's greybox `.glb` (Step 8) as the reference asset rather
   than authoring a throwaway one.
 
 Gate: the reference GLB renders lit PBR geometry through `EshiView`, assets are
@@ -308,10 +312,12 @@ and `HALF_PI`, which `lunar.cpp` and `seascape.cpp` also use, so the material
 target renames them the way the GLSL target already renames the reserved
 `noise1`–`noise4` builtins.
 
-Not yet gated in CI: the `matc` half. `matc` ships in a Filament distribution
-that CI does not have, so the macOS job checks that every shader still emits a
-material and that the refusal list is still exactly those two. Step 5 vendors
-the distribution; the compile half turns on there.
+Fully gated in CI as of Step 5's vendoring bullet. `matc` is a build-time tool
+that needs no GPU, so *both* the Linux and macOS jobs now compile every emitted
+material, and the macOS job additionally renders Pong and ripple through
+Filament and compares them against Ink. The macOS runner may have no Metal
+device, so that last comparison is gated on the same probe the shader
+validation uses.
 
 Building something to *look* at found two defects none of the gates could. The
 first was in the demo itself: `scripts/build_demo.sh` shipped whatever bundle
@@ -435,7 +441,7 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 | Native ECS and deterministic simulation | 132 core checks; stable Pong digest | Implemented |
 | Retained scene + bulk FFI transport | Reload invariant and epoch tests | Dart/native transport implemented; Flutter reload proof remains |
 | Render capability ladder | Ink/Paper/Brush; 1-LSB conformance target | Implemented for fullscreen materials, and now checked by a command |
-| Filament | Pong First Light through `.filamat` | 3D scene work missing |
+| Filament | Pong First Light through `.filamat` | Distribution pinned and gated; 3D scene work missing |
 | Dart API | Generated, version-checked package | Implemented and drift-gated |
 | Flutter composition | macOS `EshiView` external texture | Implemented and gated on leak/race diagnostics |
 | Custom materials | One source emits `.mat` and the Ink entry point | Fullscreen materials generated and gated; S2L frontend (6b) remains |
@@ -467,8 +473,8 @@ hot-reload demo without a repository checkout or an undocumented dependency.
   follows 6a rather than gating it: the conformance corpus must not depend on a
   parser that is still being built.
 
-The immediate next task is Step 5: promote Filament First Light into a 3D scene
-backend, vendoring the pinned Filament distribution — which also turns on the
-`matc` half of Step 6a's gate in CI — and using the hero asset's greybox as its
-reference GLB. Step 6a landed first, so that work inherits a generated material
-pipeline rather than a duplicated one.
+The immediate next task is the rest of Step 5: renderable, camera, light, and
+asset handles behind the internal backend interface, with `gltfio` owning glTF
+parsing. The distribution those need is now pinned and fetched, and the
+materials the geometry will wear are already generated from one source per
+shader.
