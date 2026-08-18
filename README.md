@@ -132,6 +132,23 @@ zig build eshi -Dsumi-path=../libsumi
 zig build examples -Dopengl=true
 ```
 
+#### Something to look at
+
+```bash
+zig build demo
+open build/demo/README.md
+```
+
+`build/demo` holds the same two scenes rendered on every tier this machine can
+offer, as playable video, plus the Flutter application when it has been built.
+The gates in this repository answer machine questions — does it compile, do the
+tiers agree to one least-significant bit, were the surfaces reclaimed — and none
+of them answers *does it look right*. That one needs eyes.
+
+The installed binaries are self-contained: `zig build` copies each shader source
+to `zig-out/share/eshi/shaders`, so `zig-out/bin/pong --live --grade brush` runs
+from any directory. Set `ESHI_SHADER_DIR` to read them from somewhere else.
+
 #### Larimar First Light with Filament
 
 Glow Pong is the first vertical slice of Larimar's data-oriented engine: the

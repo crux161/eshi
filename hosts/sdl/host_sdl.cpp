@@ -286,7 +286,22 @@ int main(int argc, char** argv) {
             return 1;
         }
     } else {
-        pong::build(world, &game);
+        const EshiResult rc_material = pong::build(world, &game);
+        if (rc_material != ESHI_OK) {
+            /*
+             * The grade is named because that is the actionable part: the same
+             * binary at --grade ink would run. The most common cause by far is
+             * an installed binary that cannot find its shader source, so point
+             * at the override rather than making the reader guess.
+             */
+            std::fprintf(stderr,
+                         "pong: the %s tier could not bind its material: %s\n"
+                         "  The GPU tiers read examples/pong/pong.gpu.cpp at runtime; set\n"
+                         "  ESHI_SHADER_DIR to the directory holding it, or run --grade ink.\n",
+                         eshi_world_backend_name(world), eshi_result_string(rc_material));
+            eshi_world_destroy(world);
+            return 1;
+        }
     }
 
     int rc = 0;

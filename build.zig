@@ -166,6 +166,28 @@ pub fn build(b: *std.Build) void {
         }
     };
 
+    // The GPU tiers read their shader at runtime, so an installed binary needs
+    // the sources installed beside it. Without this, zig-out/bin/pong renders
+    // black frames at Paper or Brush from any directory but this one — the
+    // backend reports the missing file, the banner still names the tier, and
+    // the exit code is zero.
+    const shader_install_dir = b.getInstallPath(.prefix, "share/eshi/shaders");
+    const shaders_step = b.step("shaders", "Install the shader sources the GPU tiers read at runtime");
+    for (example_sources) |source| {
+        if (!std.mem.endsWith(u8, source, ".cpp")) continue;
+        const install = b.addInstallFile(
+            b.path(source),
+            b.fmt("share/eshi/shaders/{s}", .{std.fs.path.basename(source)}),
+        );
+        shaders_step.dependOn(&install.step);
+    }
+    const install_pong_shader = b.addInstallFile(
+        b.path("examples/pong/pong.gpu.cpp"),
+        "share/eshi/shaders/pong.gpu.cpp",
+    );
+    shaders_step.dependOn(&install_pong_shader.step);
+    b.getInstallStep().dependOn(shaders_step);
+
     const matc_path = b.pathJoin(&.{ filament_path, "bin", "matc" });
     const pong_package_path: ?[]const u8 = if (use_filament)
         b.getInstallPath(.prefix, "share/eshi/pong.filamat")
@@ -194,6 +216,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .sumi_include = sumi_include,
+        .shader_install_dir = shader_install_dir,
         .libomp_prefix = libomp_prefix,
         .use_openmp = use_openmp,
         .use_metal = use_metal,
@@ -206,6 +229,8 @@ pub fn build(b: *std.Build) void {
     });
     const larimar_step = b.step("larimar", "Build the Larimar core and the SDL host (pong)");
     larimar_step.dependOn(&larimar_install.step);
+    // A binary without its shaders renders black frames at the GPU tiers.
+    larimar_step.dependOn(shaders_step);
     b.getInstallStep().dependOn(&larimar_install.step);
     if (pong_package) |package| {
         const install_package = b.addInstallFile(package, "share/eshi/pong.filamat");
@@ -271,12 +296,21 @@ pub fn build(b: *std.Build) void {
     );
     conformance_step.dependOn(&conformance_command.step);
 
+    // The gates above answer machine questions. This one produces the thing a
+    // person looks at, because "does it still look right" has no other answer.
+    const demo_command = b.addSystemCommand(&.{"./scripts/build_demo.sh"});
+    demo_command.step.dependOn(&larimar_install.step);
+    demo_command.step.dependOn(shaders_step);
+    const demo_step = b.step("demo", "Render build/demo: the same scenes on every available tier");
+    demo_step.dependOn(&demo_command.step);
+
     const main_install = addEshiExecutable(b, .{
         .name = "eshi",
         .shader_source = "shader.cpp",
         .target = target,
         .optimize = optimize,
         .sumi_include = sumi_include,
+        .shader_install_dir = shader_install_dir,
         .libomp_prefix = libomp_prefix,
         .use_metal = use_metal,
         .use_opengl = use_opengl,
@@ -294,7 +328,8 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .sumi_include = sumi_include,
-                .libomp_prefix = libomp_prefix,
+            .shader_install_dir = shader_install_dir,
+            .libomp_prefix = libomp_prefix,
             .use_metal = use_metal,
             .use_opengl = use_opengl,
             .use_openmp = use_openmp,
@@ -314,6 +349,7 @@ const ExecutableOptions = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     sumi_include: []const u8,
+    shader_install_dir: []const u8,
     libomp_prefix: []const u8,
     use_metal: bool,
     use_opengl: bool,
@@ -331,6 +367,9 @@ fn addEshiExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
 
     module.addIncludePath(b.path("."));
     module.addIncludePath(pathFromOption(b, options.sumi_include));
+    // Where the GPU tiers look for a shader source when the working directory
+    // is not the repository. ESHI_SHADER_DIR overrides it at runtime.
+    module.addCMacro("ESHI_SHADER_INSTALL_DIR", b.fmt("\"{s}\"", .{options.shader_install_dir}));
     module.addCMacro("LINK_SHADER", "1");
 
     const cpp_flags: []const []const u8 = if (options.use_openmp)
@@ -426,6 +465,7 @@ const LarimarOptions = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     sumi_include: []const u8,
+    shader_install_dir: []const u8,
     libomp_prefix: []const u8,
     use_openmp: bool,
     use_metal: bool,
@@ -453,6 +493,9 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
     module.addIncludePath(b.path("."));
     module.addIncludePath(b.path("core/include"));
     module.addIncludePath(pathFromOption(b, options.sumi_include));
+    // Where the GPU tiers look for a shader source when the working directory
+    // is not the repository. ESHI_SHADER_DIR overrides it at runtime.
+    module.addCMacro("ESHI_SHADER_INSTALL_DIR", b.fmt("\"{s}\"", .{options.shader_install_dir}));
 
     const cpp_flags: []const []const u8 = if (options.use_openmp)
         if (options.target.result.os.tag == .macos)

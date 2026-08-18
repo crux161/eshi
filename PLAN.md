@@ -288,6 +288,16 @@ that CI does not have, so the macOS job checks that every shader still emits a
 material and that the refusal list is still exactly those two. Step 5 vendors
 the distribution; the compile half turns on there.
 
+Building something to *look* at found a defect none of the gates could:
+`zig-out/bin/pong --grade paper` rendered pure black from any directory but the
+repository root, printed one line about a missing shader source, and exited
+zero, while the banner still announced `backend=gl`. The shader sources now
+install to `zig-out/share/eshi/shaders` and resolve from there (or from
+`ESHI_SHADER_DIR`), a tier that cannot bind its material refuses to run instead
+of presenting black frames, and `zig build demo` renders both scenes on every
+available tier into `build/demo` — with the Flutter application beside them —
+so the question "does it still look right" has an answer that is not a digest.
+
 #### 6b — S2L as an additive frontend
 
 Dependencies: 6a, and `resources/gyosho` remaining a tool rather than a

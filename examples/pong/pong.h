@@ -61,8 +61,13 @@ struct Game {
     Uniforms uniforms;
 };
 
-/** Submits the scene description, registers systems, binds the material. */
-void build(EshiWorld* w, Game* g);
+/**
+ * Submits the scene description, registers systems, binds the material.
+ *
+ * Returns the material result: a host that ignores it will run a world with no
+ * backend and present black frames.
+ */
+EshiResult build(EshiWorld* w, Game* g);
 
 /**
  * Re-submits the scene description at a fresh epoch.

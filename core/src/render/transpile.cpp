@@ -9,6 +9,7 @@
 #include "transpile.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -39,6 +40,25 @@ std::string resolve_path(const std::string& path) {
         const std::string stripped = path.substr(3);
         if (file_exists(stripped)) return stripped;
     }
+
+    /*
+     * Everything above resolves against the working directory, which is fine
+     * inside a source tree and wrong everywhere else: an installed binary run
+     * from anywhere but the repository root would fail to find its shader, and
+     * the GPU tiers would render black frames while the banner still announced
+     * their backend. The install prefix and an environment override are how a
+     * shipped binary finds the sources that ship beside it.
+     */
+    const size_t slash = path.find_last_of("/\\");
+    const std::string leaf = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    if (const char* directory = std::getenv("ESHI_SHADER_DIR")) {
+        const std::string candidate = std::string(directory) + "/" + leaf;
+        if (file_exists(candidate)) return candidate;
+    }
+#ifdef ESHI_SHADER_INSTALL_DIR
+    const std::string installed = std::string(ESHI_SHADER_INSTALL_DIR) + "/" + leaf;
+    if (file_exists(installed)) return installed;
+#endif
     return "";
 }
 
