@@ -25,7 +25,13 @@ const _leakHarness = bool.fromEnvironment('LARIMAR_LEAK_HARNESS');
 
 const _host = MacOSEshiViewHost();
 
-const _viewSize = Size(640, 360);
+/// Deliberately 4:3, not the arena's 16:9.
+///
+/// The material's horizontal extent *is* the view's aspect ratio, so a game
+/// that assumes 16:9 puts its paddles outside any narrower window — which is
+/// what the reference application did, in the default window, on the first
+/// machine that ran it. Testing at the arena's own shape would never show it.
+const _viewSize = Size(640, 480);
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -150,7 +156,57 @@ void main() {
       greaterThan(0.002),
       reason: 'two captures 20 frames apart are identical; the scene is frozen',
     );
+
+    // The paddles live at the arena's edges, so they are the part of the scene
+    // that leaves the view when the game and the window disagree about shape.
+    expect(
+      first.peakLuminanceInBand(0, 0.15),
+      greaterThan(0.3),
+      reason: 'nothing bright near the left edge; the left paddle is off view',
+    );
+    expect(
+      first.peakLuminanceInBand(0.85, 1),
+      greaterThan(0.3),
+      reason:
+          'nothing bright near the right edge; the right paddle is off view',
+    );
   });
+
+  testWidgets('ends the match and starts another', (tester) async {
+    if (!_brushIsAvailable()) return;
+
+    // A match to one point, because what is under test is that a match *ends*.
+    // The demo scored past the nine dots its material can draw and kept going,
+    // so the win condition is the subject here, not the length of a rally.
+    await tester.pumpWidget(
+      const LarimarApp(testViewSize: _viewSize, testWinningScore: 1),
+    );
+    await _pumpUntilTexture(tester);
+
+    final winner = find.byKey(const ValueKey<String>('larimar-winner'));
+    await _pumpUntil(tester, () => winner.evaluate().isNotEmpty);
+    expect(
+      winner,
+      findsOneWidget,
+      reason: 'a point was scored but the match never ended',
+    );
+    expect(tester.widget<Text>(winner).data, contains('wins'));
+
+    // And it clears again, rather than leaving the announcement up forever.
+    await _pumpUntil(tester, () => winner.evaluate().isEmpty);
+    expect(
+      winner,
+      findsNothing,
+      reason: 'the announcement never cleared; the next match cannot start',
+    );
+  });
+}
+
+/// Pumps frames until [condition] holds, for up to ten seconds of play.
+Future<void> _pumpUntil(WidgetTester tester, bool Function() condition) async {
+  for (var attempt = 0; attempt < 600 && !condition(); attempt += 1) {
+    await tester.pump(const Duration(milliseconds: 16));
+  }
 }
 
 /// A Brush-grade world needs a Metal device. Virtualized runners have none, and
@@ -281,6 +337,24 @@ final class _Frame {
           (pixels[offset] + pixels[offset + 1] + pixels[offset + 2]) /
           (3 * 255);
       if (luminance > peak) peak = luminance;
+    }
+    return peak;
+  }
+
+  /// Peak luminance in a vertical slice, as a fraction of the surface width.
+  double peakLuminanceInBand(double start, double end) {
+    final from = (start * width).round().clamp(0, width);
+    final to = (end * width).round().clamp(0, width);
+    var peak = 0.0;
+    for (var y = 0; y < height; y += 1) {
+      for (var x = from; x < to; x += 1) {
+        final offset = (y * width + x) * 4;
+        if (offset + 2 >= pixels.length) continue;
+        final luminance =
+            (pixels[offset] + pixels[offset + 1] + pixels[offset + 2]) /
+            (3 * 255);
+        if (luminance > peak) peak = luminance;
+      }
     }
     return peak;
   }

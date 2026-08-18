@@ -204,6 +204,31 @@ What replaced it splits the claim in two, because it is two claims:
   the texture layer, so the host's borrow count is the only instrument that can
   answer this, and the test now waits on it rather than on a fixed delay.
 
+Running the application then found what neither half covered: the paddles were
+outside the window. The material works in `uv = (fragCoord * 2 - iResolution) /
+iResolution.y`, so the *horizontal* extent of the scene is the view's aspect
+ratio and only the vertical one is fixed; the game placed its paddles at the
+16:9 arena's edges, which is off screen in the 4:3 window Flutter opens by
+default. The demo videos are 16:9 and showed nothing wrong. The reference
+application now takes its arena width from the view, and the visual gate runs at
+4:3 and asserts something bright at each edge — a test that would have failed
+before the fix and does, when the constant is put back.
+
+Playing it found the rest, none of which any pixel or lifecycle gate covers:
+the Flutter application had no input at all, its keys reached AppKit unhandled
+and beeped, and a match never ended — the score ran past the nine dots the
+material can draw and kept counting. Both paddles now take the keyboard (W/S and
+the arrows, matching the SDL host), the key handler claims what it uses, and a
+match plays to nine and announces its winner. That last one has a gate: an
+integration test plays a one-point match and requires the announcement to appear
+and then clear. The C++ Pong has the same missing win condition and keeps it for
+now; its deterministic digests are what several other gates compare.
+
+Not gated, and recorded as such: `footprint` reports the process's IOSurface
+count rising by two across the run. That number also covers the engine's own
+swapchain surfaces, so it cannot isolate the view's, and the in-process
+accounting above answers the question it was meant to answer.
+
 ### Step 5 — Promote Filament First Light into a 3D scene backend
 
 Dependency: Step 4.
@@ -288,7 +313,14 @@ that CI does not have, so the macOS job checks that every shader still emits a
 material and that the refusal list is still exactly those two. Step 5 vendors
 the distribution; the compile half turns on there.
 
-Building something to *look* at found a defect none of the gates could:
+Building something to *look* at found two defects none of the gates could. The
+first was in the demo itself: `scripts/build_demo.sh` shipped whatever bundle
+sat in the Flutter build directory, and `flutter test -d macos` writes its own
+bundle there — with the integration test as the application's entry point. The
+demo therefore shipped an app that ran the test suite, tore its widget tree
+down, and left a blank window. It now builds the application explicitly.
+
+The second was older:
 `zig-out/bin/pong --grade paper` rendered pure black from any directory but the
 repository root, printed one line about a missing shader source, and exited
 zero, while the banner still announced `backend=gl`. The shader sources now

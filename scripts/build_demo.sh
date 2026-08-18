@@ -117,7 +117,9 @@ zig-out/bin/pong --live --grade brush   # the GPU tier
 zig-out/bin/pong --live --gallery       # the shader instead of the game
 \`\`\`
 
-W/S move the left paddle, Up/Down the right one, Escape quits. These run from any
+W/S move the left paddle, Up/Down the right one, Escape quits. The Flutter app
+uses the same keys — W/S for cyan, arrows for magenta — and plays to nine.
+These run from any
 directory — the shader sources install to \`zig-out/share/eshi/shaders\`, and
 \`ESHI_SHADER_DIR\` overrides where they are read from.
 EOF
