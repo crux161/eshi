@@ -63,6 +63,8 @@ x/
 *.jpg
 # Exception: Uncomment the next line if you want to keep texture assets
 # !texture.jpg
+# Exception: gate evidence — captured frames a release step is judged against
+!docs/larimar/media/*.png
 
 # --- OS Junk ---
 Thumbs.db

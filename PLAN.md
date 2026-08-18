@@ -136,7 +136,7 @@ analysis/widget test on Linux x86_64 and macOS Apple Silicon. Both Dart FFI jobs
 are strict required checks on `feat/larimar`; the scaffolded macOS application
 also builds locally with the native library embedded.
 
-### Step 4 — Land `EshiView` on macOS — **in progress**
+### Step 4 — Land `EshiView` on macOS — **complete**
 
 Dependency: Step 3.
 
@@ -152,12 +152,46 @@ Dependency: Step 3.
   correctness from unfinished 3D scene work.
 - [x] Exercise five real create/resize/pause/resume/destroy cycles in the macOS
   integration runner and cover delayed creation/disposal with widget tests.
-- [ ] Run the real lifecycle loop under leak/race diagnostics and retain a
-  captured visual artifact before declaring the Step 4 gate complete.
+- [x] Run the real lifecycle loop under leak/race diagnostics and retain a
+  captured visual artifact.
 
-Gate: a widget integration test repeatedly creates, resizes, backgrounds,
-foregrounds, and destroys `EshiView` under leak/race diagnostics, while a visual
-smoke test shows animated Pong with Flutter UI layered above it.
+Gate met, in two halves, because one binary cannot answer both questions.
+
+`scripts/check_eshiview_host.sh` builds the adapter twice from its real method
+channel entry points and drives it from a platform thread against a stand-in
+raster queue with no engine present: 24 create/resize/suspend/destroy cycles and
+408 raster borrows report `0 leaks for 0 total leaked bytes` under
+`leaks --atExit`, and no findings under ThreadSanitizer. Both passes fail when
+they should — deleting `LarimarTexture`'s surface lock produces a race report at
+the resize that swaps the buffer out from under an in-flight copy, and dropping
+the `CVPixelBufferRelease` produces one rooted `CVPixelBuffer` per cycle.
+
+`scripts/check_eshiview_lifecycle.sh` runs the same loop inside a real Flutter
+engine. Twelve cycles of create, resize, background, foreground, and destroy end
+with `created: 12, disposed: 12, registered: 0, live: 0, liveSurfaceBytes: 0`,
+and `leaks`, snapshotted from outside the App Sandbox after the first cycle and
+after the last, reports the same 14320 bytes both times — no growth. Removing
+the widget's disposal call fails it at cycle 0.
+
+The visual half took two attempts, and the first one was wrong. It captured the
+app with `RepaintBoundary.toImage` and asserted Pong appeared inside the view
+rect, which passed — until it didn't: on a later run the same assertion failed
+with the surface holding a complete frame and the engine borrowing it sixty
+times a second. `toImage` rasterizes the layer tree offscreen and does not
+reliably include an external texture layer. A capture that can come back blank
+while everything works proves nothing when it is bright, either, so both of
+those earlier passes have to be read as luck.
+
+What replaced it splits the claim in two, because it is two claims:
+
+- *Larimar drew the frame.* The host reads its own surface back to a PNG —
+  [`eshiview-pong-01.png`](docs/larimar/media/eshiview-pong-01.png) and
+  [`-02`](docs/larimar/media/eshiview-pong-02.png), twenty frames apart, with
+  the ball and paddles in different places. Peak luminance rules out a cleared
+  surface; the difference between them rules out a frozen one.
+- *Flutter composited it.* The engine borrows the surface exactly when it draws
+  the texture layer, so the host's borrow count is the only instrument that can
+  answer this, and the test now waits on it rather than on a fixed delay.
 
 ### Step 5 — Promote Filament First Light into a 3D scene backend
 
@@ -240,7 +274,7 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 | Render capability ladder | Ink/Paper/Brush; 1-LSB conformance target | Implemented for fullscreen materials |
 | Filament | Pong First Light through `.filamat` | 3D scene work missing |
 | Dart API | Generated, version-checked package | Implemented and drift-gated |
-| Flutter composition | macOS `EshiView` external texture | Missing |
+| Flutter composition | macOS `EshiView` external texture | Implemented and gated on leak/race diagnostics |
 | Hot reload from Dart | 100-reload integration scenario | Missing |
 | Multi-view/shared state | Two cameras, one world/assets | Missing |
 | glTF PBR + touch tag | One reference GLB and event | Missing |
@@ -261,6 +295,8 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 - **Control RC scope.** Physics, audio, SumiC, and additional platforms are
   important but cannot enter RC0 unless they close a required gate above.
 
-The immediate next task is to close Step 4's diagnostic evidence: run the real
-macOS lifecycle loop under leak/race tooling, retain the animated Pong/Flutter
-overlay artifact, then merge the EshiView slice before beginning Filament 3D.
+The immediate next task is Step 5: promote Filament First Light into a 3D scene
+backend behind the internal backend interface, with `gltfio` owning glTF parsing
+and a pinned Filament distribution vendored under checksum. `EshiView` now has
+the texture lifecycle it will render into, and the diagnostics harnesses above
+are the regression net that work has to keep green.

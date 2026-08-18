@@ -54,3 +54,20 @@ EshiView(
 Bind a source-backed material with `world.bindShaderMaterial(...)` before the
 first frame. Its returned `LarimarMaterialBuffer` remains world-owned and is
 invalidated when the material is replaced or the world is disposed.
+
+`MacOSEshiViewHost.diagnostics()` reports the host's surface accounting —
+surfaces created, resized, presented, disposed, still registered, and still
+alive. `EshiView` never calls it; it exists so a lifecycle test can prove the
+host released what it allocated. Both halves of that gate run from the
+repository root:
+
+```sh
+./scripts/check_eshiview_host.sh && ./scripts/check_eshiview_lifecycle.sh
+```
+
+The first builds the adapter twice — once under `leaks --atExit`, once under
+ThreadSanitizer — and drives it from a platform thread and a stand-in raster
+queue with no engine present. The second runs the reference application's real
+create/resize/background/foreground/destroy loop and snapshots the process from
+outside the App Sandbox. Both write their reports, and the composited frames the
+visual test captured, to `build/larimar-diagnostics/`.

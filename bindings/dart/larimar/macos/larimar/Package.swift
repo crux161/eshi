@@ -22,6 +22,8 @@ let package = Package(
                 .linkedFramework("CoreVideo"),
                 .linkedFramework("Metal"),
                 .linkedFramework("IOSurface"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("ImageIO"),
             ]
         ),
     ],

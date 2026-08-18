@@ -1,10 +1,50 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:larimar/larimar.dart';
 
 void main() {
+  const channel = MethodChannel('dev.larimar/texture');
+
+  test('decodes the host diagnostics the lifecycle gate reads', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'diagnostics');
+      return <String, Object?>{
+        'created': 12,
+        'resized': 12,
+        'presented': 60,
+        'disposed': 12,
+        'suspensions': 24,
+        'registered': 0,
+        'live': 0,
+        'liveSurfaceBytes': 0,
+        'copies': 58,
+        'metalAvailable': true,
+      };
+    });
+    final diagnostics = await const MacOSEshiViewHost().diagnostics();
+    expect(diagnostics.created, 12);
+    expect(diagnostics.disposed, 12);
+    expect(diagnostics.live, 0);
+    expect(diagnostics.liveSurfaceBytes, 0);
+    expect(diagnostics.copies, 58);
+    expect(diagnostics.metalAvailable, isTrue);
+    expect(diagnostics.toString(), contains('presented: 60'));
+
+    // A host that answers with nothing must not read as "nothing is leaking".
+    messenger.setMockMethodCallHandler(channel, (call) async => null);
+    await expectLater(
+      const MacOSEshiViewHost().diagnostics(),
+      throwsA(isA<PlatformException>()),
+    );
+  });
   testWidgets('serializes create, resize, lifecycle, frames, and disposal', (
     tester,
   ) async {

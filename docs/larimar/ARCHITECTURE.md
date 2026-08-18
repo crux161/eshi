@@ -521,7 +521,7 @@ gets a vote on its shape.
 | C++ encoder/decoder | `core/include/eshi/scene.hpp` | Done — header-only, and the executable spec of the format |
 | Pong on the reconciler | `examples/pong/pong.cpp` | Done — the scene is a description, not a sequence of `eshi_entity_create()` calls |
 | `ffigen` bindings from `eshi.h` | `bindings/dart/larimar` | Done — generated ABI bindings, owned world/buffers, golden codecs, drift gate |
-| Flutter embedder + external texture, macOS first (§6.11) | `bindings/dart/larimar/macos` | Host slice landed — IOSurface/CVPixelBuffer/Metal texture, direct Brush submission, lifecycle integration test; leak/race diagnostic gate remains |
+| Flutter embedder + external texture, macOS first (§6.11) | `bindings/dart/larimar/macos` | Done — IOSurface/CVPixelBuffer/Metal texture, direct Brush submission, and a lifecycle loop gated under `leaks`, ThreadSanitizer, and a composited frame capture |
 
 Four things came out of building it that were not obvious from §6.6.
 
@@ -555,6 +555,22 @@ reconciler and the game argue over the ball every reload. The rule that fell out
 — *describe what the scene is, let systems own what it is doing* — is the one the
 Dart layer will have to follow too, and it is easier to state now than to
 retrofit once widgets are writing scene descriptions.
+
+**The texture host needed a harness the engine could not provide.** The
+integration test drives a real `EshiView` through real create/resize/background/
+destroy cycles, and it cannot tell a held lock from a lucky one: Flutter's raster
+thread borrows the surface on its own schedule, so a missing lock is a timing
+question the test happens to win. `check_eshiview_host.sh` removes the engine
+instead of the concurrency — the real plugin, its real method-channel entry
+points, a stand-in registry that keeps Flutter's thread contract, and
+ThreadSanitizer watching both sides. Deleting the surface lock turns it red at
+the resize; the engine-level test stays green. The same harness under
+`leaks --atExit` answers the leak question the sandboxed application cannot ask
+about itself. Its first run reported every surface still alive after disposal,
+which was the harness missing the per-cycle autorelease pool a run loop would
+have given it — worth stating because it is the failure mode of any host-free
+harness: the thing under test is only as honest as the environment you rebuild
+around it.
 
 One deliberate call worth flagging for review: an opcode the core does not
 implement stops the flush with `ESHI_ERR_UNSUPPORTED` rather than being skipped.

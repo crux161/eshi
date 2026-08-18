@@ -250,6 +250,28 @@ jobs:
           flutter analyze
           flutter test --reporter expanded
 
-      - name: Exercise the macOS EshiView lifecycle
-        working-directory: examples/larimar_flutter
-        run: flutter test integration_test/eshiview_smoke_test.dart -d macos --reporter expanded
+      # The texture adapter's own gate, with no engine in the way. `leaks
+      # --atExit` reports any surface the adapter failed to release, and the
+      # ThreadSanitizer pass reports any unsynchronised access between the
+      # platform thread and the raster queue. Removing the surface lock from
+      # LarimarPlugin.mm makes the second pass fail, which is the point: the
+      # engine-level test below cannot distinguish a held lock from a lucky one.
+      - name: Texture host under leak and race diagnostics
+        run: ./scripts/check_eshiview_host.sh
+
+      # The engine-level half. The reference application really does create,
+      # resize, background, foreground and destroy an EshiView, and `leaks`
+      # snapshots the process from outside the App Sandbox — a sandboxed process
+      # cannot open its own task port — after the first cycle and after the
+      # last. Growth between the two is the leak, not the absolute count: the
+      # OS frameworks arrive with leaks of their own.
+      - name: EshiView lifecycle under leak diagnostics
+        run: ./scripts/check_eshiview_lifecycle.sh
+
+      - name: Keep the diagnostics and the composited frames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eshiview-diagnostics
+          path: build/larimar-diagnostics
+          if-no-files-found: warn

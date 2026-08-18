@@ -15,7 +15,7 @@ IOSurface-backed Flutter textures for the Larimar game engine.
   s.platform         = :osx, '10.15'
   # Objective-C++ does not emit Swift-style framework autolink metadata, so
   # explicitly link the Flutter engine framework supplied by Flutter tooling.
-  s.frameworks       = 'FlutterMacOS', 'CoreVideo', 'Metal', 'IOSurface'
+  s.frameworks       = 'FlutterMacOS', 'CoreVideo', 'Metal', 'IOSurface', 'CoreGraphics', 'ImageIO'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++11',

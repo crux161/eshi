@@ -33,6 +33,53 @@ final class EshiViewSurface {
   final int height;
 }
 
+/// The macOS texture host's surface accounting, for lifecycle leak gates.
+///
+/// [registered] counts the surfaces the host still owns; [live] counts the ones
+/// that have not been deallocated yet, which stays above zero for as long as
+/// Flutter's raster thread is still borrowing a disposed surface. A lifecycle
+/// loop has reclaimed everything only when both reach zero and
+/// [liveSurfaceBytes] follows them down.
+///
+/// [copies] is the one that answers "is anything on screen": the engine borrows
+/// the surface only while it is compositing the texture layer, so [presented]
+/// climbing while [copies] stays at zero means frames are being produced into a
+/// view nobody is drawing.
+@immutable
+final class EshiViewDiagnostics {
+  const EshiViewDiagnostics({
+    required this.created,
+    required this.resized,
+    required this.presented,
+    required this.disposed,
+    required this.suspensions,
+    required this.registered,
+    required this.live,
+    required this.liveSurfaceBytes,
+    required this.copies,
+    required this.metalAvailable,
+  });
+
+  final int created;
+  final int resized;
+  final int presented;
+  final int disposed;
+  final int suspensions;
+  final int registered;
+  final int live;
+  final int liveSurfaceBytes;
+  final int copies;
+  final bool metalAvailable;
+
+  @override
+  String toString() =>
+      'EshiViewDiagnostics(created: $created, resized: $resized, '
+      'presented: $presented, disposed: $disposed, '
+      'suspensions: $suspensions, registered: $registered, live: $live, '
+      'liveSurfaceBytes: $liveSurfaceBytes, copies: $copies, '
+      'metalAvailable: $metalAvailable)';
+}
+
 /// Host seam kept public for deterministic widget and embedder tests.
 abstract interface class EshiViewHost {
   Future<EshiViewSurface> create({required int width, required int height});
@@ -111,6 +158,43 @@ final class MacOSEshiViewHost implements EshiViewHost {
     'dispose',
     <String, Object?>{'textureId': surface.textureId},
   );
+
+  /// Reads the host's surface accounting. [EshiView] never calls this; it
+  /// exists so a lifecycle test can prove the host let go of what it allocated.
+  Future<EshiViewDiagnostics> diagnostics() async {
+    final value = await _textureChannel.invokeMapMethod<String, Object?>(
+      'diagnostics',
+    );
+    if (value == null) {
+      throw PlatformException(
+        code: 'invalid-diagnostics',
+        message: 'The macOS texture host returned no diagnostics.',
+      );
+    }
+    int count(String name) => value[name] is int ? value[name]! as int : 0;
+    return EshiViewDiagnostics(
+      created: count('created'),
+      resized: count('resized'),
+      presented: count('presented'),
+      disposed: count('disposed'),
+      suspensions: count('suspensions'),
+      registered: count('registered'),
+      live: count('live'),
+      liveSurfaceBytes: count('liveSurfaceBytes'),
+      copies: count('copies'),
+      metalAvailable: value['metalAvailable'] == true,
+    );
+  }
+
+  /// Writes the view's surface to [path] as a PNG, bypassing the compositor.
+  ///
+  /// The pixels Larimar submitted, as the host holds them — which is the only
+  /// way to tell an empty surface apart from a layer the engine did not draw.
+  Future<void> captureSurface(EshiViewSurface surface, String path) =>
+      _textureChannel.invokeMethod('captureSurface', <String, Object?>{
+        'textureId': surface.textureId,
+        'path': path,
+      });
 
   EshiViewSurface _surfaceFromMap(Map<String, Object?>? value) {
     if (value == null) {
