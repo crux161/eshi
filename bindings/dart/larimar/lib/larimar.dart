@@ -2,6 +2,7 @@
 library;
 
 import 'dart:ffi' as ffi;
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -14,6 +15,7 @@ import 'package:flutter/widgets.dart';
 import 'src/generated/larimar_bindings_generated.dart' as native;
 
 part 'src/commands.dart';
+part 'src/asset.dart';
 part 'src/contract.dart';
 part 'src/events.dart';
 part 'src/exceptions.dart';

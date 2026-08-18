@@ -6,6 +6,16 @@ writes into directly — with ordinary Flutter UI composited above it. On Linux 
 loads the native code asset, validates ABI/protocol v1, flushes one retained
 scene, and owns the native world for the Flutter widget lifecycle.
 
+The brand hero is the first real glTF scene to use the same view. Filament loads
+`resources/larimar-model.glb`, the native renderer owns its slow Y-axis spin,
+and Flutter layers the HarmonyOS Sans wordmark and a 4.54-second, soundtrack-
+shaped color transition around its transparent texture. Audio remains host UI,
+not an engine subsystem.
+
+```sh
+flutter run -d macos -t lib/hero.dart
+```
+
 ```sh
 flutter run -d macos
 # or

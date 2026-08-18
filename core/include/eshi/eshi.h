@@ -632,6 +632,15 @@ EshiResult eshi_asset_instance(EshiWorld* w, EshiAsset asset,
                                float x, float y, float z, float scale);
 
 /**
+ * Places an instance whose root rotates around glTF's Y-up axis in the native
+ * render system. The host declares the rate once; no per-frame FFI update is
+ * required. `radians_per_second` may be negative and zero is stationary.
+ */
+EshiResult eshi_asset_instance_animated(EshiWorld* w, EshiAsset asset,
+                                        float x, float y, float z, float scale,
+                                        float radians_per_second);
+
+/**
  * Releases an asset and every instance of it.
  *
  * Assets are also released with the world, so a host that exits does not need

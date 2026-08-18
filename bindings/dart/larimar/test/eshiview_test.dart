@@ -165,6 +165,7 @@ final class _FakeHost implements EshiViewHost {
     return EshiViewSurface(
       textureId: surface.textureId,
       metalTexture: surface.metalTexture + 1,
+      pixelBuffer: surface.pixelBuffer + 1,
       width: width,
       height: height,
     );
@@ -178,6 +179,7 @@ final class _FakeHost implements EshiViewHost {
   EshiViewSurface _surface(int width, int height) => EshiViewSurface(
     textureId: _nextTexture++,
     metalTexture: 100,
+    pixelBuffer: 200,
     width: width,
     height: height,
   );

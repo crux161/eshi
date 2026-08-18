@@ -22,6 +22,7 @@ FlutterError* LarimarError(NSString* code, NSString* message) {
 @property(nonatomic, readonly) NSInteger width;
 @property(nonatomic, readonly) NSInteger height;
 @property(nonatomic, readonly) uint64_t metalTextureHandle;
+@property(nonatomic, readonly) uint64_t pixelBufferHandle;
 @property(nonatomic, readonly) uint64_t surfaceBytes;
 @property(nonatomic, readonly) uint64_t copies;
 @property(atomic, assign, getter=isSuspended) BOOL suspended;
@@ -114,6 +115,13 @@ FlutterError* LarimarError(NSString* code, NSString* message) {
   return handle;
 }
 
+- (uint64_t)pixelBufferHandle {
+  [_surfaceLock lock];
+  uint64_t handle = (uint64_t)(uintptr_t)_pixelBuffer;
+  [_surfaceLock unlock];
+  return handle;
+}
+
 - (uint64_t)surfaceBytes {
   [_surfaceLock lock];
   uint64_t bytes = _pixelBuffer ? (uint64_t)CVPixelBufferGetDataSize(_pixelBuffer) : 0;
@@ -144,7 +152,8 @@ FlutterError* LarimarError(NSString* code, NSString* message) {
 
   NSDictionary* textureAttributes = @{
     (id)kCVMetalTextureUsage : @(MTLTextureUsageShaderRead |
-                                 MTLTextureUsageShaderWrite),
+                                 MTLTextureUsageShaderWrite |
+                                 MTLTextureUsageRenderTarget),
   };
   CVMetalTextureRef cvTexture = nil;
   status = CVMetalTextureCacheCreateTextureFromImage(
@@ -469,6 +478,7 @@ FlutterError* LarimarError(NSString* code, NSString* message) {
   return @{
     @"textureId" : @(texture.textureId),
     @"metalTexture" : @(texture.metalTextureHandle),
+    @"pixelBuffer" : @(texture.pixelBufferHandle),
     @"width" : @(texture.width),
     @"height" : @(texture.height),
   };

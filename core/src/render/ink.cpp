@@ -89,6 +89,7 @@ const EshiBackendVTable kInkVTable = {
     ink_create,
     ink_destroy,
     ink_render,
+    NULL,
     /* No 3D scene: assets are refused rather than half-supported. */
     NULL,
     NULL,

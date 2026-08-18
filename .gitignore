@@ -15,7 +15,8 @@ clean.py
 *.o.tmp
 .zig-cache/
 zig-out/
-
+PLAN.md
+ARCHITECTURE.md
 resources/filament/
 
 # Fetched distributions; scripts/vendor_filament.sh pins and verifies them.

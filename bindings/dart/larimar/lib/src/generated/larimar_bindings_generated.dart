@@ -92,6 +92,44 @@ EshiResult eshi_asset_instance(
   return EshiResult.fromValue(_eshi_asset_instance(w, asset, x, y, z, scale));
 }
 
+/// Places an instance whose root rotates around glTF's Y-up axis in the native
+/// render system. The host declares the rate once; no per-frame FFI update is
+/// required. `radians_per_second` may be negative and zero is stationary.
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<EshiWorld>,
+    EshiAsset,
+    ffi.Float,
+    ffi.Float,
+    ffi.Float,
+    ffi.Float,
+    ffi.Float,
+  )
+>(symbol: 'eshi_asset_instance_animated')
+external int _eshi_asset_instance_animated(
+  ffi.Pointer<EshiWorld> w,
+  int asset,
+  double x,
+  double y,
+  double z,
+  double scale,
+  double radians_per_second,
+);
+
+EshiResult eshi_asset_instance_animated(
+  ffi.Pointer<EshiWorld> w,
+  DartEshiAsset asset,
+  double x,
+  double y,
+  double z,
+  double scale,
+  double radians_per_second,
+) {
+  return EshiResult.fromValue(
+    _eshi_asset_instance_animated(w, asset, x, y, z, scale, radians_per_second),
+  );
+}
+
 /// Loads a glTF or GLB file for this world's backend.
 ///
 /// Loading is separate from instancing because the expensive half — parsing,

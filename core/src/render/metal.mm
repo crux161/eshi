@@ -216,12 +216,20 @@ EshiResult metal_render(EshiBackend* handle,
     return ESHI_OK;
 }
 
+EshiResult metal_render_texture(EshiBackend* handle,
+                                void* metal_texture,
+                                void* pixel_buffer,
+                                int32_t width, int32_t height,
+                                float time,
+                                const void* uniforms, size_t uniform_size);
+
 const EshiBackendVTable kMetalVTable = {
     "metal",
     metal_available,
     metal_create,
     metal_destroy,
     metal_render,
+    metal_render_texture,
     /* No 3D scene: assets are refused rather than half-supported. */
     NULL,
     NULL,
@@ -233,29 +241,26 @@ const EshiBackendVTable kMetalVTable = {
 
 extern "C" const EshiBackendVTable* eshi__backend_metal(void) { return &kMetalVTable; }
 
-extern "C" EshiResult eshi__metal_render_texture(EshiWorld* world,
-                                                  void* metal_texture,
-                                                  float time) {
-    if (!world || !metal_texture) return ESHI_ERR_INVALID;
+namespace {
 
-    const EshiBackendVTable* vtable = NULL;
-    EshiBackend* handle = eshi__world_backend(world, &vtable);
-    if (!handle || vtable != &kMetalVTable) return ESHI_ERR_UNSUPPORTED;
-
+EshiResult metal_render_texture(EshiBackend* handle,
+                                void* metal_texture,
+                                void* /*pixel_buffer*/,
+                                int32_t width, int32_t height,
+                                float time,
+                                const void* uniforms, size_t uniform_size) {
     MetalBackend* backend = reinterpret_cast<MetalBackend*>(handle);
+    if (!backend || !metal_texture || width <= 0 || height <= 0) {
+        return ESHI_ERR_INVALID;
+    }
     id<MTLTexture> output_texture = (__bridge id<MTLTexture>)metal_texture;
     id<MTLDevice> device = (__bridge id<MTLDevice>)backend->device;
     if (!output_texture || output_texture.device != device ||
+        output_texture.width != (NSUInteger)width ||
+        output_texture.height != (NSUInteger)height ||
         !(output_texture.usage & MTLTextureUsageShaderWrite)) {
         return ESHI_ERR_INVALID;
     }
-
-    EshiShaderFn shader = NULL;
-    const void* uniforms = NULL;
-    size_t uniform_size = 0;
-    eshi__frame_params(world, &shader, &uniforms, &uniform_size,
-                       NULL, NULL, NULL);
-    (void)shader;
     if (uniform_size > backend->uniform_capacity) return ESHI_ERR_LIMIT;
 
     id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)backend->queue;
@@ -289,3 +294,5 @@ extern "C" EshiResult eshi__metal_render_texture(EshiWorld* world,
     }
     return ESHI_OK;
 }
+
+} /* namespace */

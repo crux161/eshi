@@ -85,6 +85,7 @@ final class LarimarWorld {
   LarimarCommandBuffer? _commandBuffer;
   LarimarEventBuffer? _eventBuffer;
   LarimarMaterialBuffer? _materialBuffer;
+  final Set<LarimarAsset> _assets = <LarimarAsset>{};
   int _nextEpoch = 1;
   bool _disposed = false;
 
@@ -95,6 +96,7 @@ final class LarimarWorld {
   int get sceneNodeCount => native.eshi_scene_node_count(_requirePointer());
   int get frameIndex => native.eshi_frame_index(_requirePointer());
   double get simulationTime => native.eshi_sim_time(_requirePointer());
+  int get assetCount => native.eshi_asset_count(_requirePointer());
 
   LarimarGrade get grade {
     final value = native.eshi_world_grade(_requirePointer()).value;
@@ -146,6 +148,63 @@ final class LarimarWorld {
   }
 
   void clearScene() => native.eshi_scene_clear(_requirePointer());
+
+  /// Loads a glTF or GLB from an ordinary filesystem path.
+  LarimarAsset loadAssetFile(String path) {
+    final pointer = _requirePointer();
+    if (path.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'must not be empty');
+    }
+    final encodedPath = path.toNativeUtf8();
+    try {
+      return using((arena) {
+        final handle = arena<ffi.Uint32>();
+        _checkNative(
+          native.eshi_asset_load(pointer, encodedPath.cast(), handle),
+          'eshi_asset_load',
+        );
+        final asset = LarimarAsset._(this, handle.value);
+        _assets.add(asset);
+        return asset;
+      });
+    } finally {
+      malloc.free(encodedPath);
+    }
+  }
+
+  /// Loads a bundled GLB without making the native loader understand Flutter's
+  /// archive format. Use [loadAssetFile] for a glTF with companion resources.
+  /// The temporary copy is deleted after gltfio has synchronously uploaded all
+  /// geometry and textures.
+  Future<LarimarAsset> loadAssetBundle(String key) async {
+    _requirePointer();
+    if (key.isEmpty) {
+      throw ArgumentError.value(key, 'key', 'must not be empty');
+    }
+    if (!key.toLowerCase().endsWith('.glb')) {
+      throw ArgumentError.value(key, 'key', 'must identify a bundled GLB');
+    }
+    final data = await rootBundle.load(key);
+    final directory = await Directory.systemTemp.createTemp('larimar-asset-');
+    final file = File('${directory.path}/asset.glb');
+    try {
+      await file.writeAsBytes(
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        flush: true,
+      );
+      return loadAssetFile(file.path);
+    } finally {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    }
+  }
+
+  void _releaseAsset(LarimarAsset asset) {
+    if (!_assets.remove(asset)) return;
+    _checkNative(
+      native.eshi_asset_release(_requirePointer(), asset._handle),
+      'eshi_asset_release',
+    );
+  }
 
   /// Binds a runtime-transpiled GPU material and returns its live uniform block.
   ///
@@ -250,6 +309,10 @@ final class LarimarWorld {
     if (_disposed) {
       return;
     }
+    for (final asset in _assets) {
+      asset._worldDisposed();
+    }
+    _assets.clear();
     native.eshi_world_destroy(_pointer);
     _materialBuffer?._release();
     _materialBuffer = null;

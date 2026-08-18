@@ -78,6 +78,14 @@ struct EshiBackendVTable {
                          EshiShaderFn cpu_shader,
                          const void* uniforms, size_t uniform_size);
 
+    /** Renders directly into a borrowed host Metal texture, when supported. */
+    EshiResult (*render_texture)(EshiBackend* backend,
+                                 void* metal_texture,
+                                 void* pixel_buffer,
+                                 int32_t width, int32_t height,
+                                 float time,
+                                 const void* uniforms, size_t uniform_size);
+
     /*
      * 3D scene operations, and the first place the vtable stops being uniform.
      *
@@ -94,7 +102,8 @@ struct EshiBackendVTable {
 
     /** Adds one instance of a loaded asset to the backend's scene. */
     EshiResult (*asset_instance)(EshiBackend* backend, uint32_t asset,
-                                 float x, float y, float z, float scale);
+                                 float x, float y, float z, float scale,
+                                 float radians_per_second);
 
     /** Releases an asset and its instances. */
     EshiResult (*asset_release)(EshiBackend* backend, uint32_t asset);
@@ -118,7 +127,8 @@ const EshiBackendVTable* eshi__backend_metal(void);
 const EshiBackendVTable* eshi__backend_filament(void);
 
 /**
- * Renders into a borrowed id<MTLTexture>, passed as an opaque pointer.
+ * Renders into a borrowed macOS surface. Direct Metal uses `metal_texture`;
+ * Filament uses `pixel_buffer` as an Apple CVPixelBuffer swapchain.
  *
  * This symbol is intentionally absent from eshi.h: it is consumed only by the
  * macOS Flutter host. The caller retains the texture until the synchronous
@@ -126,6 +136,9 @@ const EshiBackendVTable* eshi__backend_filament(void);
  */
 EshiResult eshi__metal_render_texture(EshiWorld* w,
                                       void* metal_texture,
+                                      void* pixel_buffer,
+                                      int32_t width,
+                                      int32_t height,
                                       float time);
 
 /** Maps a grade to its table, or NULL if the grade has no backend here. */

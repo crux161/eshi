@@ -8,12 +8,18 @@ const _nativeAssetId =
   ffi.Int Function(
     ffi.Pointer<native.EshiWorld>,
     ffi.Pointer<ffi.Void>,
+    ffi.Pointer<ffi.Void>,
+    ffi.Int32,
+    ffi.Int32,
     ffi.Float,
   )
 >(assetId: _nativeAssetId, symbol: 'eshi__metal_render_texture')
 external int _eshiMetalRenderTexture(
   ffi.Pointer<native.EshiWorld> world,
   ffi.Pointer<ffi.Void> metalTexture,
+  ffi.Pointer<ffi.Void> pixelBuffer,
+  int width,
+  int height,
   double time,
 );
 
@@ -23,12 +29,14 @@ final class EshiViewSurface {
   const EshiViewSurface({
     required this.textureId,
     required this.metalTexture,
+    required this.pixelBuffer,
     required this.width,
     required this.height,
   });
 
   final int textureId;
   final int metalTexture;
+  final int pixelBuffer;
   final int width;
   final int height;
 }
@@ -132,6 +140,9 @@ final class MacOSEshiViewHost implements EshiViewHost {
     final result = _eshiMetalRenderTexture(
       world._requirePointer(),
       ffi.Pointer<ffi.Void>.fromAddress(surface.metalTexture),
+      ffi.Pointer<ffi.Void>.fromAddress(surface.pixelBuffer),
+      surface.width,
+      surface.height,
       time,
     );
     _checkNative(
@@ -217,6 +228,7 @@ final class MacOSEshiViewHost implements EshiViewHost {
     return EshiViewSurface(
       textureId: field('textureId'),
       metalTexture: field('metalTexture'),
+      pixelBuffer: field('pixelBuffer'),
       width: field('width'),
       height: field('height'),
     );

@@ -31,6 +31,7 @@ const EshiBackendVTable kStubVTable = {
     stub_create,
     stub_destroy,
     stub_render,
+    NULL,
     /* No 3D scene: assets are refused rather than half-supported. */
     NULL,
     NULL,
@@ -42,9 +43,6 @@ const EshiBackendVTable kStubVTable = {
 
 #ifndef ESHI_HAVE_METAL
 extern "C" const EshiBackendVTable* eshi__backend_metal(void) { return &kStubVTable; }
-extern "C" EshiResult eshi__metal_render_texture(EshiWorld*, void*, float) {
-    return ESHI_ERR_UNSUPPORTED;
-}
 #endif
 
 #ifndef ESHI_HAVE_GL

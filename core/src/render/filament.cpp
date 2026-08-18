@@ -2,11 +2,10 @@
  * @file filament.cpp
  * @brief Kantei Grade 3 (Brush) — Google Filament backend.
  *
- * Filament renders a device-domain fullscreen material into an offscreen
- * texture, then reads RGBA8 back into the same host-owned framebuffer contract
- * used by Ink, OpenGL, and direct Metal. This readback is intentionally a First
- * Light bridge: later Flutter hosts can expose the texture directly and remove
- * the copy without changing the game or ECS APIs.
+ * Headless hosts render into an offscreen texture and read RGBA8 back into the
+ * framebuffer contract shared with Ink, OpenGL, and direct Metal. EshiView
+ * takes the zero-readback path instead: its CVPixelBuffer is a native Filament
+ * swapchain, and Flutter composites that same IOSurface.
  */
 #include <backend/PixelBufferDescriptor.h>
 #include <filament/Box.h>
@@ -20,6 +19,7 @@
 #include <filament/RenderableManager.h>
 #include <filament/Renderer.h>
 #include <filament/Scene.h>
+#include <filament/SwapChain.h>
 #include <filament/Texture.h>
 #include <filament/TransformManager.h>
 #include <filament/VertexBuffer.h>
@@ -60,11 +60,20 @@ static_assert(ESHI_ENTITY_INDEX_BITS == utils::FILAMENT_GENERATION_SHIFT,
  */
 const size_t kMaxAssetInstances = 8;
 
+struct AssetPlacement {
+    float x;
+    float y;
+    float z;
+    float scale;
+    float radians_per_second;
+};
+
 /** One loaded glTF, its reserved instances, and how many are in the scene. */
 struct AssetSlot {
     uint32_t id;
     filament::gltfio::FilamentAsset* asset;
     std::vector<filament::gltfio::FilamentInstance*> instances;
+    std::vector<AssetPlacement> placements;
     size_t used;
 };
 
@@ -79,6 +88,10 @@ struct FilamentBackend {
     filament::Camera* camera;
     filament::Texture* color;
     filament::RenderTarget* target;
+    filament::SwapChain* external_swapchain;
+    void* external_handle;
+    int32_t external_width;
+    int32_t external_height;
     filament::VertexBuffer* vertices;
     filament::IndexBuffer* indices;
     filament::Material* material;
@@ -184,6 +197,7 @@ void filament_destroy(EshiBackend* handle) {
         engine->destroy(backend->indices);
         engine->destroy(backend->target);
         engine->destroy(backend->color);
+        engine->destroy(backend->external_swapchain);
         engine->destroy(backend->view);
         engine->destroy(backend->scene);
         engine->destroy(backend->renderer);
@@ -210,6 +224,10 @@ EshiBackend* filament_create(int32_t width, int32_t height, const char* /*source
     backend->camera = NULL;
     backend->color = NULL;
     backend->target = NULL;
+    backend->external_swapchain = NULL;
+    backend->external_handle = NULL;
+    backend->external_width = 0;
+    backend->external_height = 0;
     backend->vertices = NULL;
     backend->indices = NULL;
     backend->material = NULL;
@@ -448,6 +466,7 @@ EshiResult filament_asset_load(EshiBackend* handle, const char* path, uint32_t* 
      * second megabyte.
      */
     slot.instances.assign(kMaxAssetInstances, NULL);
+    slot.placements.assign(kMaxAssetInstances, AssetPlacement{});
     slot.asset = backend->asset_loader->createInstancedAsset(
             bytes.data(), (uint32_t)bytes.size(), slot.instances.data(), kMaxAssetInstances);
     if (!slot.asset) {
@@ -469,7 +488,8 @@ EshiResult filament_asset_load(EshiBackend* handle, const char* path, uint32_t* 
 }
 
 EshiResult filament_asset_instance(EshiBackend* handle, uint32_t asset,
-                                   float x, float y, float z, float scale) {
+                                   float x, float y, float z, float scale,
+                                   float radians_per_second) {
     FilamentBackend* backend = reinterpret_cast<FilamentBackend*>(handle);
     if (!backend) return ESHI_ERR_INVALID;
     AssetSlot* slot = find_asset(backend, asset);
@@ -478,7 +498,9 @@ EshiResult filament_asset_instance(EshiBackend* handle, uint32_t asset,
 
     filament::gltfio::FilamentInstance* instance = slot->instances[slot->used];
     if (!instance) return ESHI_ERR_INVALID;
+    const size_t placement_index = slot->used;
     slot->used += 1;
+    slot->placements[placement_index] = {x, y, z, scale, radians_per_second};
 
     filament::TransformManager& transforms = backend->engine->getTransformManager();
     const filament::TransformManager::Instance root =
@@ -491,6 +513,27 @@ EshiResult filament_asset_instance(EshiBackend* handle, uint32_t asset,
     backend->scene->addEntities(instance->getEntities(), instance->getEntityCount());
     backend->scene->addEntity(instance->getRoot());
     return ESHI_OK;
+}
+
+void animate_asset_instances(FilamentBackend* backend, float time) {
+    filament::TransformManager& transforms = backend->engine->getTransformManager();
+    for (AssetSlot& slot : backend->assets) {
+        for (size_t i = 0; i < slot.used; ++i) {
+            filament::gltfio::FilamentInstance* instance = slot.instances[i];
+            if (!instance) continue;
+            const AssetPlacement& placement = slot.placements[i];
+            const filament::TransformManager::Instance root =
+                    transforms.getInstance(instance->getRoot());
+            transforms.setTransform(
+                    root,
+                    filament::math::mat4f::translation(
+                            filament::math::float3{placement.x, placement.y, placement.z}) *
+                    filament::math::mat4f::rotation(
+                            time * placement.radians_per_second,
+                            filament::math::float3{0.0f, 1.0f, 0.0f}) *
+                    filament::math::mat4f::scaling(placement.scale));
+        }
+    }
 }
 
 EshiResult filament_asset_release(EshiBackend* handle, uint32_t asset) {
@@ -538,6 +581,8 @@ EshiResult filament_render(EshiBackend* handle, uint8_t* pixels, int32_t stride,
         }
     }
 
+    animate_asset_instances(backend, time);
+
     backend->renderer->renderStandaloneView(backend->view);
     filament::backend::PixelBufferDescriptor readback(
             backend->readback.data(), backend->readback.size(),
@@ -559,12 +604,97 @@ EshiResult filament_render(EshiBackend* handle, uint8_t* pixels, int32_t stride,
     return ESHI_OK;
 }
 
+EshiResult filament_render_texture(EshiBackend* handle,
+                                   void* metal_texture,
+                                   void* pixel_buffer,
+                                   int32_t width, int32_t height,
+                                   float time,
+                                   const void* uniforms, size_t uniform_size) {
+#if !defined(__APPLE__)
+    (void)handle;
+    (void)metal_texture;
+    (void)pixel_buffer;
+    (void)width;
+    (void)height;
+    (void)time;
+    (void)uniforms;
+    (void)uniform_size;
+    return ESHI_ERR_UNSUPPORTED;
+#else
+    FilamentBackend* backend = reinterpret_cast<FilamentBackend*>(handle);
+    (void)metal_texture;
+    if (!backend || !pixel_buffer || width <= 0 || height <= 0) {
+        return ESHI_ERR_INVALID;
+    }
+    if ((uniform_size % sizeof(float)) != 0 ||
+        uniform_size / sizeof(float) > kUniformFloatCapacity ||
+        (uniform_size > 0 && !uniforms)) {
+        return ESHI_ERR_INVALID;
+    }
+
+    filament::Engine& engine = *backend->engine;
+    if (backend->external_handle != pixel_buffer ||
+        backend->external_width != width || backend->external_height != height) {
+        backend->view->setRenderTarget(backend->target);
+        engine.destroy(backend->external_swapchain);
+        backend->external_swapchain = engine.createSwapChain(
+                pixel_buffer, filament::SwapChain::CONFIG_APPLE_CVPIXELBUFFER);
+        if (!backend->external_swapchain) return ESHI_ERR_INVALID;
+        backend->external_handle = pixel_buffer;
+        backend->external_width = width;
+        backend->external_height = height;
+    }
+
+    if (backend->material_instance) {
+        backend->material_instance->setParameter("eshiTime", time);
+        const size_t uniform_count = uniform_size / sizeof(float);
+        if (uniform_count > 0) {
+            backend->material_instance->setParameter(
+                    "eshiUniforms", static_cast<const float*>(uniforms), uniform_count);
+        }
+    }
+    animate_asset_instances(backend, time);
+
+    filament::Renderer::ClearOptions transparent = {};
+    transparent.clearColor = {0.0, 0.0, 0.0, 0.0};
+    transparent.clear = true;
+    backend->renderer->setClearOptions(transparent);
+    backend->view->setBlendMode(filament::View::BlendMode::TRANSLUCENT);
+    backend->view->setRenderTarget(NULL);
+    backend->view->setViewport({0, 0, (uint32_t)width, (uint32_t)height});
+    backend->camera->setProjection(45.0, (double)width / (double)height,
+                                   0.1, 100.0, filament::Camera::Fov::VERTICAL);
+    const bool frame_started =
+            backend->renderer->beginFrame(backend->external_swapchain);
+    if (frame_started) {
+        backend->renderer->render(backend->view);
+        backend->renderer->endFrame();
+        engine.flushAndWait();
+    }
+
+    /* Leave the headless framebuffer contract exactly as it was. */
+    filament::Renderer::ClearOptions opaque = {};
+    opaque.clearColor = {0.02, 0.027, 0.051, 1.0};
+    opaque.clear = true;
+    backend->renderer->setClearOptions(opaque);
+    backend->view->setBlendMode(filament::View::BlendMode::OPAQUE);
+    backend->view->setRenderTarget(backend->target);
+    backend->view->setViewport(
+            {0, 0, (uint32_t)backend->width, (uint32_t)backend->height});
+    backend->camera->setProjection(
+            45.0, (double)backend->width / (double)backend->height,
+            0.1, 100.0, filament::Camera::Fov::VERTICAL);
+    return frame_started ? ESHI_OK : ESHI_ERR_INVALID;
+#endif
+}
+
 const EshiBackendVTable kFilamentVTable = {
         "filament",
         filament_available,
         filament_create,
         filament_destroy,
         filament_render,
+        filament_render_texture,
         filament_asset_load,
         filament_asset_instance,
         filament_asset_release,

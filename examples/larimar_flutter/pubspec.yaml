@@ -28,6 +28,7 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  audioplayers: ^6.5.1
   flutter:
     sdk: flutter
 
@@ -62,6 +63,19 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/larimar-model.glb
+    - assets/larimar-official.mp3
+
+  fonts:
+    - family: HarmonyOS Sans
+      fonts:
+        - asset: assets/fonts/HarmonyOS_Sans_Regular.ttf
+        - asset: assets/fonts/HarmonyOS_Sans_Light.ttf
+          weight: 300
+        - asset: assets/fonts/HarmonyOS_Sans_Medium.ttf
+          weight: 500
 
   # To add assets to your application, add an assets section, like this:
   # assets:

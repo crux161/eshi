@@ -140,6 +140,12 @@ void test_assets_on_a_backend_without_a_scene() {
           "loading without somewhere to put the handle is refused");
     check(eshi_asset_instance(w, 0, 0.0f, 0.0f, 0.0f, 1.0f) == ESHI_ERR_INVALID,
           "instancing the null asset is refused");
+    check(eshi_asset_instance_animated(w, 1, 0.0f, 0.0f, 0.0f, 1.0f, 0.3f) ==
+                  ESHI_ERR_UNSUPPORTED,
+          "an animated instance reports that Ink has no scene");
+    check(eshi_asset_instance_animated(NULL, 1, 0.0f, 0.0f, 0.0f, 1.0f, 0.3f) ==
+                  ESHI_ERR_INVALID,
+          "an animated instance rejects a null world");
     check(eshi_asset_release(w, 0) == ESHI_ERR_INVALID,
           "releasing the null asset is refused");
     check(eshi_asset_count(NULL) == 0, "counting no world is zero, not a crash");

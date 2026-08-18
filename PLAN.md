@@ -405,6 +405,13 @@ to hold together at once.
 - Give `EshiView` and the Filament view a transparent clear color, and layer
   the widget beneath ordinary Flutter controls.
 
+Presentation prototype landed ahead of the full gate: `lib/hero.dart` loads the
+supplied textured `resources/larimar-model.glb`, declares a native Y-axis spin
+once, renders Filament directly into `EshiView` through a CVPixelBuffer
+swapchain, and composes HarmonyOS Sans UI plus host-owned soundtrack/gradient
+choreography. The general `AngularVelocity` ECS component and caustic surface
+material above remain required before Step 8 is complete.
+
 Gate: the logo spins under Flutter UI with one FFI call to declare it and none
 per frame; a C++ unit test shows `AngularVelocity` advancing a transform over 60
 ticks with no host involvement; and a captured frame is retained the way Step 4's
@@ -460,7 +467,7 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 | Hot reload from Dart | 100-reload integration scenario | Missing |
 | Multi-view/shared state | Two cameras, one world/assets | Missing |
 | glTF PBR + touch tag | One reference GLB and event | Reference GLB renders lit PBR; `extras` event missing |
-| Hero asset | Spinning refractive logo under Flutter UI | Missing |
+| Hero asset | Spinning refractive logo under Flutter UI | Presentation prototype works; caustic material and general ECS rotation remain |
 | Release engineering | Green required CI and installable artifacts | Steps 1 and 3 gated; packaging remains |
 
 ## 6. Decision rules and risks

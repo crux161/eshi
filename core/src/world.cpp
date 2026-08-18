@@ -739,16 +739,30 @@ extern "C" EshiResult eshi_material_set(EshiWorld* w, const EshiMaterial* materi
         w->backend = NULL;
     }
 
+    /*
+     * A macOS consumer build can carry both Brush implementations. Runtime
+     * C++ shader source belongs to direct Metal, while packaged materials and
+     * 3D-only worlds belong to Filament. Selecting here keeps the public grade
+     * stable and lets the Pong reference and the glTF hero coexist in one app.
+     */
+    const EshiBackendVTable* selected = eshi__backend_for_grade(w->cfg.grade);
+    if (w->cfg.grade == ESHI_GRADE_BRUSH && material->source_path &&
+        !material->package_path) {
+        const EshiBackendVTable* metal = eshi__backend_metal();
+        if (metal && metal->available && metal->available()) selected = metal;
+    }
+
     EshiBackend* backend = NULL;
     try {
-        backend = w->backend_vtable->create(w->cfg.width, w->cfg.height,
-                                            material->source_path, material->package_path);
+        backend = selected->create(w->cfg.width, w->cfg.height,
+                                   material->source_path, material->package_path);
     } catch (...) {
         return ESHI_ERR_NOMEM;
     }
     if (!backend) return ESHI_ERR_UNSUPPORTED;
 
     w->backend = backend;
+    w->backend_vtable = selected;
     w->material = *material;
     return ESHI_OK;
 }
@@ -809,10 +823,17 @@ extern "C" EshiResult eshi_asset_load(EshiWorld* w, const char* path, EshiAsset*
 
 extern "C" EshiResult eshi_asset_instance(EshiWorld* w, EshiAsset asset,
                                           float x, float y, float z, float scale) {
+    return eshi_asset_instance_animated(w, asset, x, y, z, scale, 0.0f);
+}
+
+extern "C" EshiResult eshi_asset_instance_animated(EshiWorld* w, EshiAsset asset,
+                                                     float x, float y, float z, float scale,
+                                                     float radians_per_second) {
     if (!w || asset == 0) return ESHI_ERR_INVALID;
     if (!w->backend || !w->backend_vtable->asset_instance) return ESHI_ERR_UNSUPPORTED;
     try {
-        return w->backend_vtable->asset_instance(w->backend, asset, x, y, z, scale);
+        return w->backend_vtable->asset_instance(
+                w->backend, asset, x, y, z, scale, radians_per_second);
     } catch (const std::bad_alloc&) {
         return ESHI_ERR_NOMEM;
     } catch (...) {
@@ -843,6 +864,27 @@ extern "C" EshiResult eshi_render(EshiWorld* w, uint8_t* pixels, int32_t stride,
                                          w->material.cpu_shader,
                                          w->material.uniform_data,
                                          w->material.uniform_size);
+    } catch (const std::bad_alloc&) {
+        return ESHI_ERR_NOMEM;
+    } catch (...) {
+        return ESHI_ERR_INVALID;
+    }
+}
+
+extern "C" EshiResult eshi__metal_render_texture(EshiWorld* w,
+                                                   void* metal_texture,
+                                                   void* pixel_buffer,
+                                                   int32_t width,
+                                                   int32_t height,
+                                                   float time) {
+    if (!w || !metal_texture || width <= 0 || height <= 0) return ESHI_ERR_INVALID;
+    if (!w->backend || !w->backend_vtable || !w->backend_vtable->render_texture) {
+        return ESHI_ERR_UNSUPPORTED;
+    }
+    try {
+        return w->backend_vtable->render_texture(
+                w->backend, metal_texture, pixel_buffer, width, height, time,
+                w->material.uniform_data, w->material.uniform_size);
     } catch (const std::bad_alloc&) {
         return ESHI_ERR_NOMEM;
     } catch (...) {

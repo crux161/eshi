@@ -295,6 +295,7 @@ Future<void> _requestSnapshot(String phase) async {
 EshiViewSurface _textureSurface(WidgetTester tester) => EshiViewSurface(
   textureId: tester.widget<Texture>(find.byType(Texture)).textureId,
   metalTexture: 0,
+  pixelBuffer: 0,
   width: 0,
   height: 0,
 );

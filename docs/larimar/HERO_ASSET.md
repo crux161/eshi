@@ -1,8 +1,10 @@
 # Larimar Hero Asset
 
-> Status: planned as [`PLAN.md`](../../PLAN.md) Step 8, after the Dart proof and
-> before hardening. This is the detail record for that step; the plan holds the
-> gate. [`ARCHITECTURE.md`](ARCHITECTURE.md) holds the decisions it rests on.
+> Status: presentation prototype landed in
+> `examples/larimar_flutter/lib/hero.dart`; the caustic surface material and
+> general ECS `AngularVelocity` component remain Step 8 work. This is the detail
+> record for that step; [`PLAN.md`](../../PLAN.md) holds the final gate and
+> [`ARCHITECTURE.md`](ARCHITECTURE.md) holds the decisions it rests on.
 
 ## 1. Outcome
 
@@ -105,10 +107,15 @@ per frame while it turns.
 
 | Area | Evidence | Current state |
 |---|---|---|
-| glTF pipeline | Logo `.glb` instantiated by a Dart command | Unstarted |
+| glTF pipeline | `resources/larimar-model.glb` loaded and instantiated by Dart | Prototype complete |
 | Custom material | Caustic material compiled and bound | Unstarted |
-| Native ECS | `AngularVelocity` integrates locally | Unstarted |
-| Composition | Transparent `EshiView` under Flutter UI | Unstarted |
+| Native motion | One-time `spinY` declaration; general `AngularVelocity` ECS | Prototype complete; ECS remains |
+| Composition | Transparent Filament `EshiView` under Flutter UI | Prototype complete |
+
+The prototype also loops `resources/larimar-official.mp3` in the Flutter host.
+Its 4.54-second spectral rise, shimmer, and decay keyframe the background color
+story. This does not introduce an engine audio API; audio remains deferred RC
+scope, as the architecture record requires.
 
 ## 6. Decision rules and risks
 
