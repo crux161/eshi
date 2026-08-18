@@ -62,7 +62,8 @@ render_asset() {
   local log
   if ! log=$("$pong" --grade brush --asset "$asset" --res "$resolution" \
       --frames "$gallery_frames" --seed "$seed" --out "$output" 2>&1); then
-    printf '  %-7s %-6s skipped — no 3D backend on this host\n' "logo" "brush"
+    printf '  %-7s %-6s skipped — this build has no Filament backend\n' "logo" "brush"
+    printf '                 (./scripts/vendor_filament.sh && zig build demo -Dfilament=true)\n'
     rm -f "$output"
     return 0
   fi

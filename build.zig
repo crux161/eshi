@@ -122,6 +122,8 @@ pub fn build(b: *std.Build) void {
         "Path to the libomp prefix on macOS",
     ) orelse b.pathJoin(&.{ homebrew_prefix, "opt", "libomp" });
 
+    ensurePkgConfig(b, homebrew_prefix);
+
     const eshi_step = b.step("eshi", "Build and install only the main eshi executable");
     const examples_step = b.step("examples", "Build and install all example executables");
 
@@ -666,6 +668,78 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
     exe.lto = if (options.use_lto) .full else .none;
 
     return b.addInstallArtifact(exe, .{});
+}
+
+/// Makes `pkg-config` usable when the one on PATH cannot see system packages.
+///
+/// On a machine with devkitpro installed, `pkg-config` resolves to devkitpro's,
+/// whose built-in search path contains only devkitpro's own packages. Every
+/// SDL-linked target then aborts with `pkg-config failed for library SDL2_ttf`
+/// — a Zig panic and a stack trace, for what is really an unset environment
+/// variable. Probing first means a machine whose pkg-config already works is
+/// left exactly as it was.
+fn ensurePkgConfig(b: *std.Build, homebrew_prefix: []const u8) void {
+    if (pkgConfigSees(b, "SDL2_ttf")) return;
+
+    var search: []const u8 = b.graph.environ_map.get("PKG_CONFIG_PATH") orelse "";
+    search = appendPkgConfigDir(b, search, b.pathJoin(&.{ homebrew_prefix, "lib", "pkgconfig" }));
+    search = appendPkgConfigDir(b, search, b.pathJoin(&.{ homebrew_prefix, "share", "pkgconfig" }));
+    // Every keg-only formula keeps its own .pc files under opt/<name>/lib.
+    search = appendPkgConfigTree(b, search, b.pathJoin(&.{ homebrew_prefix, "opt" }), &.{ "lib", "pkgconfig" });
+    // And Homebrew keeps the macOS system-library .pc files per OS version, which
+    // is where SDL2_ttf -> freetype2 -> zlib finally resolves.
+    search = appendPkgConfigTree(b, search, b.pathJoin(&.{ homebrew_prefix, "Library", "Homebrew", "os", "mac", "pkgconfig" }), &.{});
+
+    if (search.len == 0) return;
+    b.graph.environ_map.put("PKG_CONFIG_PATH", search) catch return;
+
+    if (!pkgConfigSees(b, "SDL2_ttf")) {
+        std.debug.print(
+            \\note: pkg-config cannot find SDL2_ttf, so SDL-linked targets will fail.
+            \\  `pkg-config` on PATH is {s}. Install the dependencies, or set
+            \\  PKG_CONFIG_PATH to a prefix that has them.
+            \\
+        , .{b.graph.environ_map.get("PATH") orelse "unset"});
+    }
+}
+
+/// True when pkg-config, as the build will invoke it, knows this package.
+///
+/// runAllowFail returns an error for any non-zero exit and only writes the code
+/// on that path, so success is "it returned at all" — reading the code instead
+/// reports every probe as a failure, including the one that works.
+fn pkgConfigSees(b: *std.Build, package: []const u8) bool {
+    var code: u8 = 1;
+    const output = b.runAllowFail(
+        &.{ "pkg-config", "--exists", package },
+        &code,
+        .ignore,
+    ) catch return false;
+    b.allocator.free(output);
+    return true;
+}
+
+fn appendPkgConfigDir(b: *std.Build, search: []const u8, dir: []const u8) []const u8 {
+    std.Io.Dir.accessAbsolute(b.graph.io, dir, .{}) catch return search;
+    if (search.len == 0) return dir;
+    return b.fmt("{s}:{s}", .{ search, dir });
+}
+
+/// Appends `<root>/<entry>/<suffix...>` for every entry in `root`.
+fn appendPkgConfigTree(b: *std.Build, search: []const u8, root: []const u8, suffix: []const []const u8) []const u8 {
+    var result = search;
+    var dir = std.Io.Dir.openDirAbsolute(b.graph.io, root, .{ .iterate = true }) catch return result;
+    defer dir.close(b.graph.io);
+    var it = dir.iterate();
+    while (it.next(b.graph.io) catch null) |entry| {
+        if (entry.kind != .directory and entry.kind != .sym_link) continue;
+        var parts = std.ArrayList([]const u8).initCapacity(b.allocator, suffix.len + 2) catch return result;
+        parts.appendAssumeCapacity(root);
+        parts.appendAssumeCapacity(entry.name);
+        for (suffix) |part| parts.appendAssumeCapacity(part);
+        result = appendPkgConfigDir(b, result, b.pathJoin(parts.items));
+    }
+    return result;
 }
 
 const ToolOptions = struct {
