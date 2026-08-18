@@ -54,12 +54,29 @@ render() {
   rendered+=("$scene-$grade.mp4")
 }
 
+# The 3D reference asset, when this build has a Filament backend to draw it.
+render_asset() {
+  local asset="$repository_root/zig-out/share/eshi/larimar_logo.glb"
+  [ -f "$asset" ] || return 0
+  local output="$demo_dir/logo-brush.mp4"
+  local log
+  if ! log=$("$pong" --grade brush --asset "$asset" --res "$resolution" \
+      --frames "$gallery_frames" --seed "$seed" --out "$output" 2>&1); then
+    printf '  %-7s %-6s skipped — no 3D backend on this host\n' "logo" "brush"
+    rm -f "$output"
+    return 0
+  fi
+  printf '  %-7s %-6s %s (filament)\n' "logo" "brush" "$(basename "$output")"
+  rendered+=("logo-brush.mp4")
+}
+
 echo "Rendering $resolution demos into $demo_dir"
 for scene in pong ripple; do
   for grade in ink paper brush; do
     render "$scene" "$grade"
   done
 done
+render_asset
 
 # The Flutter application is the other half of what there is to look at, and it
 # is built by a different toolchain.
@@ -102,6 +119,7 @@ Rendered by \`scripts/build_demo.sh\` at ${resolution}, seed ${seed}.
 | \`pong-paper.mp4\` | The same game through OpenGL. Should be indistinguishable from Ink. |
 | \`pong-brush.mp4\` | The same game through Metal or Filament, from a material generated out of the same shader source. Also indistinguishable. |
 | \`ripple-*.mp4\` | The gallery shader on each tier: concentric rings — a blue core, orange and pink bands, a yellow rim — pulsing outward. |
+| \`logo-brush.mp4\` | The reference glTF asset — a faceted gem, lit PBR geometry loaded through gltfio — rendered by the Filament tier. |
 | \`LarimarFirstLight.app\` | The Flutter application: animated Pong composited *under* ordinary Flutter UI through an external texture. The header counts frames presented and frames the engine composited; both should climb together. |
 | \`eshiview-pong-0*.png\` | The view's surface read straight back from the host, twenty frames apart: what Larimar drew, before Flutter composited it. |
 

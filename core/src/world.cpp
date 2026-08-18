@@ -753,6 +753,88 @@ extern "C" EshiResult eshi_material_set(EshiWorld* w, const EshiMaterial* materi
     return ESHI_OK;
 }
 
+/* ===========================================================================
+ * Assets
+ *
+ * Every function here is a thin router: validate, hand the call to the
+ * backend's optional asset entry points, and translate an absent entry point
+ * into ESHI_ERR_UNSUPPORTED. Nothing about glTF, meshes or materials lives at
+ * this level, which is what keeps Filament out of the public header.
+ * ==========================================================================*/
+namespace {
+
+/*
+ * A 3D scene does not need a fullscreen material, but the backend that draws
+ * it is created by eshi_material_set today. Build one on demand so a host can
+ * load geometry into a fresh world without first binding a material it has no
+ * use for.
+ */
+EshiResult ensure_backend(EshiWorld* w) {
+    if (w->backend) return ESHI_OK;
+    EshiBackend* backend = NULL;
+    try {
+        backend = w->backend_vtable->create(w->cfg.width, w->cfg.height, NULL, NULL);
+    } catch (...) {
+        return ESHI_ERR_NOMEM;
+    }
+    if (!backend) return ESHI_ERR_UNSUPPORTED;
+    w->backend = backend;
+    return ESHI_OK;
+}
+
+} /* namespace */
+
+extern "C" EshiResult eshi_asset_load(EshiWorld* w, const char* path, EshiAsset* out_asset) {
+    if (!w || !path || !out_asset) return ESHI_ERR_INVALID;
+    if (!w->backend_vtable || !w->backend_vtable->asset_load) return ESHI_ERR_UNSUPPORTED;
+
+    const EshiResult ready = ensure_backend(w);
+    if (ready != ESHI_OK) return ready;
+
+    uint32_t asset = 0;
+    EshiResult rc;
+    try {
+        rc = w->backend_vtable->asset_load(w->backend, path, &asset);
+    } catch (const std::bad_alloc&) {
+        return ESHI_ERR_NOMEM;
+    } catch (...) {
+        return ESHI_ERR_INVALID;
+    }
+    if (rc != ESHI_OK) return rc;
+    /* A backend that reports success must produce a usable handle. */
+    if (asset == 0) return ESHI_ERR_INVALID;
+    *out_asset = asset;
+    return ESHI_OK;
+}
+
+extern "C" EshiResult eshi_asset_instance(EshiWorld* w, EshiAsset asset,
+                                          float x, float y, float z, float scale) {
+    if (!w || asset == 0) return ESHI_ERR_INVALID;
+    if (!w->backend || !w->backend_vtable->asset_instance) return ESHI_ERR_UNSUPPORTED;
+    try {
+        return w->backend_vtable->asset_instance(w->backend, asset, x, y, z, scale);
+    } catch (const std::bad_alloc&) {
+        return ESHI_ERR_NOMEM;
+    } catch (...) {
+        return ESHI_ERR_INVALID;
+    }
+}
+
+extern "C" EshiResult eshi_asset_release(EshiWorld* w, EshiAsset asset) {
+    if (!w || asset == 0) return ESHI_ERR_INVALID;
+    if (!w->backend || !w->backend_vtable->asset_release) return ESHI_ERR_UNSUPPORTED;
+    try {
+        return w->backend_vtable->asset_release(w->backend, asset);
+    } catch (...) {
+        return ESHI_ERR_INVALID;
+    }
+}
+
+extern "C" uint32_t eshi_asset_count(const EshiWorld* w) {
+    if (!w || !w->backend || !w->backend_vtable->asset_count) return 0;
+    return w->backend_vtable->asset_count(w->backend);
+}
+
 extern "C" EshiResult eshi_render(EshiWorld* w, uint8_t* pixels, int32_t stride, float time) {
     if (!w || !pixels || stride <= 0) return ESHI_ERR_INVALID;
     if (!w->backend) return ESHI_ERR_INVALID;

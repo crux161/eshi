@@ -166,6 +166,13 @@ jobs:
           zig build larimar tools -Dfilament=true
           ./scripts/check_tier_conformance.sh
 
+      # glTF through gltfio, and the failure paths that matter more than the
+      # happy one: an empty scene must not pass for a drawn one, and a missing
+      # or corrupt asset must be refused by name.
+      - name: The reference asset loads, instances, and draws
+        if: steps.metal.outputs.available == 'true'
+        run: ./scripts/check_asset_render.sh
+
       - name: Larimar core tests
         run: zig build test
 

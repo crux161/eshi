@@ -131,6 +131,13 @@ void print_usage(const char* argv0) {
         "  --reload N   Re-submit the scene description every N frames, standing\n"
         "               in for a Dart hot reload. Retained mode means this must\n"
         "               not change the digest.\n"
+        "  --asset FILE Load a glTF/GLB and render it instead of a 2D scene.\n"
+        "               Brush grade with the Filament backend only; other tiers\n"
+        "               report that they have no 3D scene rather than drawing\n"
+        "               nothing.\n"
+        "  --asset-instances N  Copies of the asset to place. Zero loads it and\n"
+        "               places none, which is how a test tells a drawn frame from\n"
+        "               a cleared one. Default 1.\n"
         "  --gallery    Run the ripple gallery shader instead of pong. Required\n"
         "               for the GPU tiers, which cannot execute pong's typed\n"
         "               uniform struct.\n",
@@ -147,6 +154,8 @@ int main(int argc, char** argv) {
     bool        live = false;
     bool        hash_only = false;
     bool        gallery = false;
+    const char* asset_path = NULL;
+    int         asset_instances = 1;
     std::string dump_dir;
     EncoderBackend encoder_backend = EncoderBackend::Auto;
     EshiGrade   grade = ESHI_GRADE_INK;
@@ -188,6 +197,10 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--gallery") {
             gallery = true;
+        } else if (arg == "--asset" && i + 1 < argc) {
+            asset_path = argv[++i];
+        } else if (arg == "--asset-instances" && i + 1 < argc) {
+            asset_instances = std::atoi(argv[++i]);
         } else if (arg == "--grade" && i + 1 < argc) {
             bool ok = false;
             grade = parse_grade(argv[++i], &ok);
@@ -254,12 +267,42 @@ int main(int argc, char** argv) {
                 eshi_grade_string(eshi_world_grade(world)),
                 eshi_world_backend_name(world),
                 width, height, (unsigned long long)seed,
-                gallery ? "ripple" : "pong");
+                asset_path ? asset_path : (gallery ? "ripple" : "pong"));
 
     pong::Game game;
     std::memset(&game, 0, sizeof(game));
 
-    if (gallery) {
+    if (asset_path) {
+        /*
+         * The 3D path: no fullscreen material at all. The world builds its
+         * backend when the asset arrives, and a tier without a scene says so
+         * instead of presenting an empty frame.
+         */
+        EshiAsset asset = 0;
+        const EshiResult rc_asset = eshi_asset_load(world, asset_path, &asset);
+        if (rc_asset != ESHI_OK) {
+            std::fprintf(stderr,
+                         "eshi_asset_load(%s) failed: %s\n"
+                         "  3D assets need --grade brush in a build with -Dfilament=true.\n",
+                         asset_path, eshi_result_string(rc_asset));
+            eshi_world_destroy(world);
+            return 1;
+        }
+        for (int instance = 0; instance < asset_instances; ++instance) {
+            /* Spread copies along X so a second one is visibly a second one. */
+            const float offset = (float)instance * 1.1f - (float)(asset_instances - 1) * 0.55f;
+            const EshiResult rc_instance =
+                    eshi_asset_instance(world, asset, offset, 0.0f, 0.0f, 1.0f);
+            if (rc_instance != ESHI_OK) {
+                std::fprintf(stderr, "eshi_asset_instance failed: %s\n",
+                             eshi_result_string(rc_instance));
+                eshi_world_destroy(world);
+                return 1;
+            }
+        }
+        std::printf("[eshi/host] asset=%s instances=%d assets=%u\n", asset_path,
+                    asset_instances, eshi_asset_count(world));
+    } else if (gallery) {
         /*
          * The same source file in every role: compiled in for Ink, handed to
          * the lightweight GPU tiers as a path they transpile at runtime, and

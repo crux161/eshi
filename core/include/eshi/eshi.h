@@ -45,7 +45,7 @@ extern "C" {
 #define ESHI_ABI_VERSION_MINOR_OF(version) (((uint32_t)(version) >> 16) & 0xFFu)
 #define ESHI_ABI_VERSION_PATCH_OF(version) (((uint32_t)(version) >> 8) & 0xFFu)
 
-#define ESHI_ABI_VERSION              ESHI_ABI_VERSION_PACK(1, 0, 0)
+#define ESHI_ABI_VERSION              ESHI_ABI_VERSION_PACK(1, 1, 0)
 #define ESHI_COMMAND_PROTOCOL_VERSION 1u
 #define ESHI_EVENT_PROTOCOL_VERSION   1u
 
@@ -586,6 +586,61 @@ int eshi_grade_available(EshiGrade grade);
 
 /** Highest grade available in this binary, or ESHI_GRADE_INK. */
 EshiGrade eshi_grade_best(void);
+
+/* ===========================================================================
+ * Assets
+ *
+ * A 3D asset is an opaque handle. The loader, the meshes, the materials and
+ * the renderable entities behind it belong to whichever backend the world
+ * selected, and none of those types appear here — the boundary rule in
+ * ARCHITECTURE.md §5 applies to Filament exactly as it does to SDL.
+ *
+ * Geometry is a capability, not a guarantee. A grade whose backend has no
+ * scene — Ink, Paper, direct Metal — returns ESHI_ERR_UNSUPPORTED rather than
+ * pretending to load something, so a host can ask instead of assuming.
+ * ==========================================================================*/
+
+/** An asset the backend has loaded. Zero is "no asset". */
+typedef uint32_t EshiAsset;
+
+/**
+ * Loads a glTF or GLB file for this world's backend.
+ *
+ * Loading is separate from instancing because the expensive half — parsing,
+ * decoding buffers, uploading vertex data and textures — happens once per
+ * asset no matter how many copies of it a scene holds, and no matter how many
+ * views draw that scene.
+ *
+ * Returns ESHI_ERR_UNSUPPORTED when the grade has no 3D scene,
+ * ESHI_ERR_INVALID when the file is missing or is not a glTF the loader
+ * accepts, and ESHI_ERR_NOMEM when the upload fails. A failed load leaves
+ * `out_asset` untouched and the world renderable; it never half-loads.
+ */
+EshiResult eshi_asset_load(EshiWorld* w, const char* path, EshiAsset* out_asset);
+
+/**
+ * Places an instance of a loaded asset into the world's scene.
+ *
+ * Instances share the asset's uploaded geometry and materials; the cost of a
+ * second one is a transform and a set of renderable entities, not a second
+ * copy of the mesh.
+ *
+ * `x`, `y`, `z` position the instance, and `scale` is uniform. The convention
+ * is right-handed, Y up, metres, matching glTF's own.
+ */
+EshiResult eshi_asset_instance(EshiWorld* w, EshiAsset asset,
+                               float x, float y, float z, float scale);
+
+/**
+ * Releases an asset and every instance of it.
+ *
+ * Assets are also released with the world, so a host that exits does not need
+ * to call this; a host that swaps scenes does.
+ */
+EshiResult eshi_asset_release(EshiWorld* w, EshiAsset asset);
+
+/** Number of assets this world currently holds. Zero on grades without 3D. */
+uint32_t eshi_asset_count(const EshiWorld* w);
 
 /**
  * Supplies OpenGL entry points for the Paper backend.

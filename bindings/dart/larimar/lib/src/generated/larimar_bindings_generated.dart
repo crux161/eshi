@@ -50,6 +50,93 @@ EshiResult eshi_abi_query(ffi.Pointer<EshiAbiInfo> out_info, int out_size) {
   return EshiResult.fromValue(_eshi_abi_query(out_info, out_size));
 }
 
+/// Number of assets this world currently holds. Zero on grades without 3D.
+@ffi.Native<ffi.Uint32 Function(ffi.Pointer<EshiWorld>)>()
+external int eshi_asset_count(ffi.Pointer<EshiWorld> w);
+
+/// Places an instance of a loaded asset into the world's scene.
+///
+/// Instances share the asset's uploaded geometry and materials; the cost of a
+/// second one is a transform and a set of renderable entities, not a second
+/// copy of the mesh.
+///
+/// `x`, `y`, `z` position the instance, and `scale` is uniform. The convention
+/// is right-handed, Y up, metres, matching glTF's own.
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<EshiWorld>,
+    EshiAsset,
+    ffi.Float,
+    ffi.Float,
+    ffi.Float,
+    ffi.Float,
+  )
+>(symbol: 'eshi_asset_instance')
+external int _eshi_asset_instance(
+  ffi.Pointer<EshiWorld> w,
+  int asset,
+  double x,
+  double y,
+  double z,
+  double scale,
+);
+
+EshiResult eshi_asset_instance(
+  ffi.Pointer<EshiWorld> w,
+  DartEshiAsset asset,
+  double x,
+  double y,
+  double z,
+  double scale,
+) {
+  return EshiResult.fromValue(_eshi_asset_instance(w, asset, x, y, z, scale));
+}
+
+/// Loads a glTF or GLB file for this world's backend.
+///
+/// Loading is separate from instancing because the expensive half — parsing,
+/// decoding buffers, uploading vertex data and textures — happens once per
+/// asset no matter how many copies of it a scene holds, and no matter how many
+/// views draw that scene.
+///
+/// Returns ESHI_ERR_UNSUPPORTED when the grade has no 3D scene,
+/// ESHI_ERR_INVALID when the file is missing or is not a glTF the loader
+/// accepts, and ESHI_ERR_NOMEM when the upload fails. A failed load leaves
+/// `out_asset` untouched and the world renderable; it never half-loads.
+@ffi.Native<
+  ffi.Int Function(
+    ffi.Pointer<EshiWorld>,
+    ffi.Pointer<ffi.Char>,
+    ffi.Pointer<EshiAsset>,
+  )
+>(symbol: 'eshi_asset_load')
+external int _eshi_asset_load(
+  ffi.Pointer<EshiWorld> w,
+  ffi.Pointer<ffi.Char> path,
+  ffi.Pointer<EshiAsset> out_asset,
+);
+
+EshiResult eshi_asset_load(
+  ffi.Pointer<EshiWorld> w,
+  ffi.Pointer<ffi.Char> path,
+  ffi.Pointer<EshiAsset> out_asset,
+) {
+  return EshiResult.fromValue(_eshi_asset_load(w, path, out_asset));
+}
+
+/// Releases an asset and every instance of it.
+///
+/// Assets are also released with the world, so a host that exits does not need
+/// to call this; a host that swaps scenes does.
+@ffi.Native<ffi.Int Function(ffi.Pointer<EshiWorld>, EshiAsset)>(
+  symbol: 'eshi_asset_release',
+)
+external int _eshi_asset_release(ffi.Pointer<EshiWorld> w, int asset);
+
+EshiResult eshi_asset_release(ffi.Pointer<EshiWorld> w, DartEshiAsset asset) {
+  return EshiResult.fromValue(_eshi_asset_release(w, asset));
+}
+
 /// Clamps the transform to an axis-aligned range after motion integrates.
 /// Generic replacement for the hand-written paddle clamping in the old Pong.
 @ffi.Native<
@@ -631,7 +718,7 @@ external void eshi_world_size(
   ffi.Pointer<ffi.Int32> out_h,
 );
 
-const int ESHI_ABI_VERSION = 16777216;
+const int ESHI_ABI_VERSION = 16842752;
 
 const int ESHI_COMMAND_PROTOCOL_VERSION = 1;
 
@@ -903,6 +990,10 @@ final class EshiAbiInfo extends ffi.Struct {
     ..ref.material_uniform_data_offset = material_uniform_data_offset
     ..ref.material_uniform_size_offset = material_uniform_size_offset;
 }
+
+/// An asset the backend has loaded. Zero is "no asset".
+typedef EshiAsset = ffi.Uint32;
+typedef DartEshiAsset = int;
 
 /// Collider response flags.
 enum EshiColliderFlags {

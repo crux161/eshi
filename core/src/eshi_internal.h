@@ -77,6 +77,30 @@ struct EshiBackendVTable {
                          uint8_t* pixels, int32_t stride, float time,
                          EshiShaderFn cpu_shader,
                          const void* uniforms, size_t uniform_size);
+
+    /*
+     * 3D scene operations, and the first place the vtable stops being uniform.
+     *
+     * A backend that has no scene leaves these NULL and the world answers
+     * ESHI_ERR_UNSUPPORTED — which is the honest answer for Ink, Paper, and
+     * direct Metal, all of which render a fullscreen material and nothing
+     * else. Making them optional keeps the capability ladder in the vtable
+     * rather than in a grade comparison somewhere else.
+     */
+
+    /** Parses and uploads a glTF/GLB. Writes a nonzero handle on success. */
+    EshiResult (*asset_load)(EshiBackend* backend, const char* path,
+                             uint32_t* out_asset);
+
+    /** Adds one instance of a loaded asset to the backend's scene. */
+    EshiResult (*asset_instance)(EshiBackend* backend, uint32_t asset,
+                                 float x, float y, float z, float scale);
+
+    /** Releases an asset and its instances. */
+    EshiResult (*asset_release)(EshiBackend* backend, uint32_t asset);
+
+    /** Assets currently loaded, for hosts and tests that ask. */
+    uint32_t (*asset_count)(const EshiBackend* backend);
 };
 
 /**

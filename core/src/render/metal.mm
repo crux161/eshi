@@ -222,6 +222,11 @@ const EshiBackendVTable kMetalVTable = {
     metal_create,
     metal_destroy,
     metal_render,
+    /* No 3D scene: assets are refused rather than half-supported. */
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 } /* namespace */

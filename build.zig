@@ -140,13 +140,23 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const gemgen = addToolExecutable(b, .{
+        .name = "eshi-gemgen",
+        .sources = &.{"core/tools/gemgen.cpp"},
+        .target = target,
+        .optimize = optimize,
+    });
     const matgen_install = b.addInstallArtifact(matgen, .{});
     const ppmdiff_install = b.addInstallArtifact(ppmdiff, .{});
-    const tools_step = b.step("tools", "Build the material generator and the frame comparator");
+    const gemgen_install = b.addInstallArtifact(gemgen, .{});
+    const tools_step = b.step("tools", "Build the material, asset, and frame-comparison tools");
     tools_step.dependOn(&matgen_install.step);
     tools_step.dependOn(&ppmdiff_install.step);
+    tools_step.dependOn(&gemgen_install.step);
     b.getInstallStep().dependOn(&matgen_install.step);
     b.getInstallStep().dependOn(&ppmdiff_install.step);
+    b.getInstallStep().dependOn(&gemgen_install.step);
+
 
     // Larimar: the Phase 0 engine core plus its hosts. Built independently of
     // the shadertoy gallery above so neither path can break the other.
@@ -181,7 +191,7 @@ pub fn build(b: *std.Build) void {
     // backend reports the missing file, the banner still names the tier, and
     // the exit code is zero.
     const shader_install_dir = b.getInstallPath(.prefix, "share/eshi/shaders");
-    const shaders_step = b.step("shaders", "Install the shader sources the GPU tiers read at runtime");
+    const shaders_step = b.step("shaders", "Install the shader sources and reference asset read at runtime");
     for (example_sources) |source| {
         if (!std.mem.endsWith(u8, source, ".cpp")) continue;
         const install = b.addInstallFile(
@@ -195,6 +205,15 @@ pub fn build(b: *std.Build) void {
         "share/eshi/shaders/pong.gpu.cpp",
     );
     shaders_step.dependOn(&install_pong_shader.step);
+
+    // The reference asset, generated rather than checked in for the same reason
+    // the materials are: the input is reviewable and the output reproducible.
+    // PLAN Step 8 replaces it with a Blender-authored gem at the same path.
+    const generate_logo = b.addRunArtifact(gemgen);
+    generate_logo.addArg("-o");
+    const logo_glb = generate_logo.addOutputFileArg("larimar_logo.glb");
+    const install_logo = b.addInstallFile(logo_glb, "share/eshi/larimar_logo.glb");
+    shaders_step.dependOn(&install_logo.step);
     b.getInstallStep().dependOn(shaders_step);
 
     const matc_path = b.pathJoin(&.{ filament_path, "bin", "matc" });
@@ -567,11 +586,26 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
             .language = .cpp,
         });
 
+        // gltfio brings its own dependency set: the ubershader archive it
+        // vends materials from, the glTF parser, and the codecs a glTF may
+        // reference. Link order matters for static archives, so the consumers
+        // come before what they consume.
         const filament_libraries = [_][]const u8{
+            "gltfio",
+            "gltfio_core",
             "filament",
             "backend",
             "filabridge",
             "filaflat",
+            "geometry",
+            "dracodec",
+            "ktxreader",
+            "image",
+            "meshoptimizer",
+            "stb",
+            "uberarchive",
+            "uberzlib",
+            "basis_transcoder",
             "bluegl",
             "bluevk",
             "smol-v",

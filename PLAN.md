@@ -240,15 +240,27 @@ Dependency: Step 4.
   `-Dfilament-path`'s default — a build cannot silently link a different
   Filament than the one its materials were compiled by. Attribution lives in
   [`third_party/NOTICE.md`](third_party/NOTICE.md).
-- [ ] Add renderable/mesh, camera, light, and asset handles to the internal
-  backend interface and command protocol without leaking Filament into the
-  public ABI.
-- [ ] Use `gltfio` for glTF/GLB parsing and resource loading; use instancing
-  rather than duplicate asset uploads.
-- [ ] Establish PBR defaults, image-based lighting, color space, units, camera
-  convention, and deterministic asset failure behavior.
-- [ ] Use the hero asset's greybox `.glb` (Step 8) as the reference asset rather
-  than authoring a throwaway one.
+- [x] Add asset handles to the internal backend interface and the public ABI
+  without leaking Filament into it. `EshiAsset` is an opaque `uint32_t`;
+  `eshi_asset_load`, `_instance`, `_release` and `_count` route to four optional
+  vtable entries that a backend without a scene simply leaves null. The ABI
+  minor moved to 1.1.0 — additive, so a package built against 1.0 still loads.
+- [x] Use `gltfio` for glTF/GLB parsing and resource loading; use instancing
+  rather than duplicate asset uploads. Assets are created instanced from the
+  start, so three copies of the logo report `instances=3 assets=1`.
+- [x] Establish PBR defaults, units, camera convention, and deterministic asset
+  failure behaviour: glTF's own right-handed Y-up metres, a 45° vertical field
+  of view, photographic exposure, one daylight directional light, and an
+  explicit opaque clear.
+- [x] Use the hero asset's greybox `.glb` (Step 8) as the reference asset rather
+  than authoring a throwaway one — `eshi-gemgen` writes it, for the same reason
+  the materials are generated rather than checked in.
+- [ ] Image-based lighting, which is why a fully metallic material still renders
+  dark; the reference material is a dielectric so the gap is visible rather
+  than disguised.
+- [ ] Renderable/mesh, camera and light *commands*, so a Dart scene can place
+  geometry rather than a host calling the C API directly.
+- [ ] The `EshiView` half of the gate: one upload shared across two views.
 
 Gate: the reference GLB renders lit PBR geometry through `EshiView`, assets are
 uploaded once across two views, and missing/corrupt assets return actionable
@@ -441,13 +453,13 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 | Native ECS and deterministic simulation | 132 core checks; stable Pong digest | Implemented |
 | Retained scene + bulk FFI transport | Reload invariant and epoch tests | Dart/native transport implemented; Flutter reload proof remains |
 | Render capability ladder | Ink/Paper/Brush; 1-LSB conformance target | Implemented for fullscreen materials, and now checked by a command |
-| Filament | Pong First Light through `.filamat` | Distribution pinned and gated; 3D scene work missing |
+| Filament | Pong First Light through `.filamat` | Distribution pinned; glTF loads, instances and draws; IBL and scene commands remain |
 | Dart API | Generated, version-checked package | Implemented and drift-gated |
 | Flutter composition | macOS `EshiView` external texture | Implemented and gated on leak/race diagnostics |
 | Custom materials | One source emits `.mat` and the Ink entry point | Fullscreen materials generated and gated; S2L frontend (6b) remains |
 | Hot reload from Dart | 100-reload integration scenario | Missing |
 | Multi-view/shared state | Two cameras, one world/assets | Missing |
-| glTF PBR + touch tag | One reference GLB and event | Missing |
+| glTF PBR + touch tag | One reference GLB and event | Reference GLB renders lit PBR; `extras` event missing |
 | Hero asset | Spinning refractive logo under Flutter UI | Missing |
 | Release engineering | Green required CI and installable artifacts | Steps 1 and 3 gated; packaging remains |
 
@@ -473,8 +485,8 @@ hot-reload demo without a repository checkout or an undocumented dependency.
   follows 6a rather than gating it: the conformance corpus must not depend on a
   parser that is still being built.
 
-The immediate next task is the rest of Step 5: renderable, camera, light, and
-asset handles behind the internal backend interface, with `gltfio` owning glTF
-parsing. The distribution those need is now pinned and fetched, and the
-materials the geometry will wear are already generated from one source per
-shader.
+The immediate next task is the rest of Step 5: image-based lighting, the scene
+commands that let Dart place geometry rather than a host calling the C API, and
+the two-view upload-sharing half of the gate. Loading, instancing and drawing a
+glTF now work end to end, with `scripts/check_asset_render.sh` proving a drawn
+frame differs from an empty one.
