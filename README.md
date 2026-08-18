@@ -152,12 +152,27 @@ zig build larimar -Dfilament=true
 ./zig-out/bin/pong --grade brush --live
 ```
 
-The build compiles `examples/pong/pong.mat` with Filament's `matc`, installs the
-package at `zig-out/share/eshi/pong.filamat`, and maps Kantei Brush to Filament.
-The public C API does not expose Filament types. To consume an already-installed
-distribution instead, pass `-Dfilament-path=/path/to/filament`; use
-`-Dfilament-arch=...` when its library directory is not the inferred `arm64` or
-`x86_64`.
+The build generates each material from the shader source the other tiers
+already use — `eshi-matgen` emits a `.mat`, `matc` compiles it — and installs
+the packages at `zig-out/share/eshi/`. No `.mat` is checked in, because a
+material that exists as both a shader and a hand-written copy stays correct only
+until somebody edits one of them. See
+[`docs/larimar/SHADER_SUBSET.md`](docs/larimar/SHADER_SUBSET.md) for the subset
+those sources are written in, and the two gallery programs the material domain
+cannot express.
+
+Kantei Brush maps to Filament, and the public C API does not expose Filament
+types. To consume an already-installed distribution instead, pass
+`-Dfilament-path=/path/to/filament`; use `-Dfilament-arch=...` when its library
+directory is not the inferred `arm64` or `x86_64`.
+
+Whether the tiers actually agree is a command rather than a claim:
+
+```bash
+zig build larimar tools -Dfilament=true
+./scripts/check_tier_conformance.sh   # every available tier vs Ink, within 1 LSB
+./scripts/check_materials.sh          # every shader still emits a material
+```
 
 #### Hot-reload safety, without Dart
 

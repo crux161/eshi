@@ -261,14 +261,20 @@ int main(int argc, char** argv) {
 
     if (gallery) {
         /*
-         * The same source file in both roles: compiled in for Ink, handed to
-         * the GPU tiers as a path they transpile at runtime. Comparing the two
-         * digests is the cross-tier conformance check.
+         * The same source file in every role: compiled in for Ink, handed to
+         * the lightweight GPU tiers as a path they transpile at runtime, and
+         * emitted as a Filament material by eshi-matgen at build time.
+         * Comparing the resulting frames is the cross-tier conformance check —
+         * see scripts/check_tier_conformance.sh.
          */
         EshiMaterial material;
         material.cpu_shader = eshi::shader_no_uniforms<mainImage>();
         material.source_path = "examples/ripple.cpp";
+#ifdef ESHI_GALLERY_PACKAGE_PATH
+        material.package_path = ESHI_GALLERY_PACKAGE_PATH;
+#else
         material.package_path = NULL;
+#endif
         material.uniform_data = NULL;
         material.uniform_size = 0;
 

@@ -23,7 +23,18 @@ namespace transpile {
 
 enum Target {
     kTargetGlsl, /**< GLSL 3.30 core, fragment stage. */
-    kTargetMsl   /**< Metal Shading Language, compute kernel. */
+    kTargetMsl,  /**< Metal Shading Language, compute kernel. */
+    /**
+     * A Filament material definition for `matc`.
+     *
+     * The body rules are GLSL's — a `.mat` fragment block is GLSL ES 3.0 — but
+     * the wrapper is not a shader. Filament owns the vertex stage, the
+     * varyings, and the uniform layout, so the emitted material declares its
+     * parameters, reconstructs `fragCoord` from the device-domain position, and
+     * assigns the result to `MaterialInputs::baseColor` under the unlit model.
+     * See docs/larimar/SHADER_SUBSET.md for what that domain cannot express.
+     */
+    kTargetMat
 };
 
 /**
@@ -35,7 +46,11 @@ enum Target {
  * @param uniform_floats Size of the game's uniform block in floats. Zero omits
  *                       the `eshi_uniforms` binding entirely.
  * @param out_error      Set to a human-readable reason when this returns false.
- * @return               false if the source could not be read.
+ * @return               false if the source could not be read, or — for
+ *                       kTargetMat — if it uses something the material domain
+ *                       cannot express. Refusing is deliberate: a silently
+ *                       degraded material renders a wrong picture instead of
+ *                       failing a build.
  */
 bool build_program(const std::string& path,
                    Target target,

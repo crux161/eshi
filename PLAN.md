@@ -21,6 +21,10 @@ complete product slice:
 7. The same core still runs Pong and the shader gallery through the Ink, Paper,
    and Brush grades, including deterministic headless rendering and video
    export.
+8. One authored material source produces both the Filament material and the CPU
+   entry point, with no shader maintained twice and the tiers agreeing to 1 LSB.
+9. A hero asset — a spinning, refractive logo — renders that whole stack as one
+   image: glTF geometry, a compiled material, native rotation, Flutter UI above.
 
 That is the smallest honest release candidate comparable in nature to
 [Fluorite's public description](https://fluorite.game/): Dart authoring, a
@@ -61,6 +65,9 @@ claim shipping console support or superiority that has not been measured.
   and application lifecycle handling.
 - Filament mesh/renderable, transform, camera, light, material, and glTF asset
   support sufficient for one small PBR scene.
+- A dual-target material compiler: one authored source emits both a `.mat`
+  definition that `matc` compiles for Filament and the `mainImage` entry point
+  the Ink tier executes, with the shader subset written down as a specification.
 - Retained Dart scene declarations, live hot reload, shared state, two views,
   picking, and one glTF `extras` trigger event.
 - Automated native, Dart, widget, integration, conformance, and smoke tests.
@@ -72,9 +79,13 @@ claim shipping console support or superiority that has not been measured.
 - Console SDK integration, certification, or a public "runs on consoles" claim.
 - Windows, iOS, Android, Web, and production Embedded Linux hosts.
 - SDL3 migration unless it blocks an RC gate; SDL2 remains a supported harness.
-- Jolt/3D physics, audio redesign, Gold/NPU work, SumiC retargeting, an editor,
-  and a broadphase rewrite.
+- Jolt/3D physics, audio redesign, Gold/NPU work, an editor, and a broadphase
+  rewrite.
 - General-purpose 3D coverage beyond the reference glTF vertical slice.
+- S2L as an authoring language for anything outside the gallery corpus, and the
+  WGSL/`hanga` live-coding loop. Step 6b brings the language in as a source
+  generator; making it the only way to author a Larimar material does not
+  belong in RC0.
 
 ## 4. Ordered execution plan
 
@@ -205,13 +216,95 @@ Dependency: Step 4.
   convention, and deterministic asset failure behavior.
 - Vendor a pinned official Filament distribution with checksums and Apache-2.0
   NOTICE compliance; do not build Filament from source in ordinary consumer
-  builds.
+  builds. Step 6a needs `matc` from that distribution and pulls the fetch script
+  forward.
+- Use the hero asset's greybox `.glb` (Step 8) as the reference asset rather
+  than authoring a throwaway one.
 
 Gate: the reference GLB renders lit PBR geometry through `EshiView`, assets are
 uploaded once across two views, and missing/corrupt assets return actionable
 errors rather than blank output or crashes.
 
-### Step 6 — Prove Dart hot reload, shared state, multi-view, and touch
+### Step 6 — One material source, every tier
+
+Dependency for 6a: Filament First Light, which landed — `matc` runs from
+`build.zig` today and the Brush tier renders a `.filamat`. This step does *not*
+wait on Step 5; the fullscreen material path it gates already exists, and
+leaving it until after Step 5 would mean carrying a hand-maintained duplicate
+through the 3D work.
+
+The duplicate is the reason this step exists. `examples/pong/pong.mat` is a
+hand-written transliteration of `examples/pong/pong.gpu.cpp`: same `sdBox`, same
+`glow`, same constants, same score loop, two files to keep in step. Every
+material added under Filament multiplies that. `core/src/render/transpile.h`
+already calls itself "the de-facto S2L" and already treats the 20 gallery
+programs as its conformance corpus; the missing emitter is `.mat`.
+
+#### 6a — Emit `.mat` from the shader subset — **complete**
+
+- [x] Write the subset down as a specification, closing
+  [`ARCHITECTURE.md`](docs/larimar/ARCHITECTURE.md) §9 open question 5 —
+  [`SHADER_SUBSET.md`](docs/larimar/SHADER_SUBSET.md). It is what 20 programs
+  already conform to; the document is a description, not a redesign.
+- [x] Add a `.mat` target to `transpile.cpp` beside GLSL and MSL, and a
+  build-time generator (`eshi-matgen`) that writes the material for `matc`.
+- [x] Generate `pong.filamat` from `pong.gpu.cpp` and delete the hand-written
+  `pong.mat`. Refuse to emit, with a diagnostic naming the cause, for any
+  construct the `.mat` fragment domain cannot express — never degrade silently.
+- [x] Build the cross-tier comparison the plan had so far measured by hand:
+  dump raw frames per tier and compare them, so "within 1 LSB" is a command
+  rather than a table in a document.
+
+Gate met. `examples/pong/pong.mat` is gone: the build runs `eshi-matgen` over
+`pong.gpu.cpp` and pipes the result to `matc`, so Pong's material has one
+definition again. The same pipeline gives `examples/ripple.cpp` a package, which
+is what lets a gallery shader reach Filament at all — it previously failed with
+"material has no package_path".
+
+`scripts/check_tier_conformance.sh` renders both scenes on every tier the host
+offers and compares raw frames: Pong and ripple, on Paper (OpenGL) and Brush
+(Filament), against Ink — four comparisons, all `mean=0.0000/255 max=1/255` at
+320x180 over 60 frames. It refuses to pass a tier that quietly fell back to Ink,
+because comparing Ink to Ink would be green and meaningless.
+
+`scripts/check_materials.sh` runs the emitter over the whole corpus: 18 of the
+20 programs compile through `matc`. The other two refuse, and finding out *why*
+was the useful part of this step:
+
+- `warp.cpp` samples `iChannel0`, and the material declares no sampler.
+- `rainforest.cpp` opens its march loop inside `#ifdef LOWQUALITY` and again
+  inside the `#else`. Every compiler in the chain handles that; `matc` splits a
+  `.mat` into blocks by counting braces *before* preprocessing, so the fragment
+  block ran past its own closing brace and matc reported an unexpected character
+  on an innocent line. The emitter now says that instead.
+
+A third finding was fixable rather than a limit: Filament's prelude defines `PI`
+and `HALF_PI`, which `lunar.cpp` and `seascape.cpp` also use, so the material
+target renames them the way the GLSL target already renames the reserved
+`noise1`–`noise4` builtins.
+
+Not yet gated in CI: the `matc` half. `matc` ships in a Filament distribution
+that CI does not have, so the macOS job checks that every shader still emits a
+material and that the refusal list is still exactly those two. Step 5 vendors
+the distribution; the compile half turns on there.
+
+#### 6b — S2L as an additive frontend
+
+Dependencies: 6a, and `resources/gyosho` remaining a tool rather than a
+dependency (§4 of the architecture record: Rust is build-time only).
+
+- Give `sumic` a `CppGenerator` that emits the subset 6a specified, so an S2L
+  material reaches Filament, OpenGL, Metal, and Ink through the path 6a already
+  gates. Nothing in the runtime links Rust; CI checks the generated C++ in.
+- Port a representative slice of the gallery — not all 20 — to `.sumi`, chosen
+  to exercise the constructs the subset spec names.
+- Reject at compile time what the declared Kantei grade cannot execute.
+
+Gate: a `.sumi` source renders on Brush and Ink within 1 LSB through generated
+C++, and a drift check fails if the checked-in generated source no longer
+matches what `sumic` produces — the same gate shape as the `ffigen` bindings.
+
+### Step 7 — Prove Dart hot reload, shared state, multi-view, and touch
 
 Dependencies: Steps 3 and 5.
 
@@ -229,9 +322,37 @@ Gate: an automated integration scenario hot-reloads the scene 100 times during
 simulation, retains the expected entity/asset counts and state digest, shows
 both views updating, and receives the expected tagged hit event.
 
-### Step 7 — Harden the release candidate
+### Step 8 — Cut the hero asset
 
-Dependencies: Steps 1–6.
+Dependencies: Steps 5, 6, and 7. Detailed in
+[`docs/larimar/HERO_ASSET.md`](docs/larimar/HERO_ASSET.md).
+
+The spinning refractive logo is the release's one image, and it is also the
+first thing in the plan that is *not* a fullscreen material: a caustic surface
+shader on real geometry, driven by a native component, composited under Flutter
+UI. Each of those is a capability Steps 5–7 build; this step is where they have
+to hold together at once.
+
+- Author `larimar_logo.glb` and use it as Step 5's reference asset from that
+  step onward, so the release has one asset rather than a test one and a pretty
+  one.
+- Write the caustic material against the subset from Step 6, mapping Voronoi
+  noise to `baseColor`, `clearCoat`, and transmission. This is the first surface
+  material: the fullscreen unlit mapping Step 6 gates does not cover it, and
+  what the subset cannot express must fail loudly.
+- Add an `AngularVelocity` component and the system that integrates it, so
+  rotation is simulation the core owns rather than an animation Dart drives.
+- Give `EshiView` and the Filament view a transparent clear color, and layer
+  the widget beneath ordinary Flutter controls.
+
+Gate: the logo spins under Flutter UI with one FFI call to declare it and none
+per frame; a C++ unit test shows `AngularVelocity` advancing a transform over 60
+ticks with no host involvement; and a captured frame is retained the way Step 4's
+composition evidence was.
+
+### Step 9 — Harden the release candidate
+
+Dependencies: Steps 1–8.
 
 - Add a CI matrix for native core, Flutter package, example app, sanitizer,
   release-mode smoke, cross-tier pixel conformance, and package assembly.
@@ -249,9 +370,9 @@ Dependencies: Steps 1–6.
 Gate: every measurement is published as a build artifact, no critical defect is
 open, and every required test is green from a clean checkout.
 
-### Step 8 — Cut RC0
+### Step 10 — Cut RC0
 
-Dependency: Step 7.
+Dependency: Step 9.
 
 - Select a SemVer prerelease (`0.1.0-rc.1`), freeze the ABI and dependencies,
   and create a release branch from a green commit.
@@ -271,13 +392,15 @@ hot-reload demo without a repository checkout or an undocumented dependency.
 |---|---|---|
 | Native ECS and deterministic simulation | 132 core checks; stable Pong digest | Implemented |
 | Retained scene + bulk FFI transport | Reload invariant and epoch tests | Dart/native transport implemented; Flutter reload proof remains |
-| Render capability ladder | Ink/Paper/Brush; 1-LSB conformance target | Implemented for fullscreen materials |
+| Render capability ladder | Ink/Paper/Brush; 1-LSB conformance target | Implemented for fullscreen materials, and now checked by a command |
 | Filament | Pong First Light through `.filamat` | 3D scene work missing |
 | Dart API | Generated, version-checked package | Implemented and drift-gated |
 | Flutter composition | macOS `EshiView` external texture | Implemented and gated on leak/race diagnostics |
+| Custom materials | One source emits `.mat` and the Ink entry point | Fullscreen materials generated and gated; S2L frontend (6b) remains |
 | Hot reload from Dart | 100-reload integration scenario | Missing |
 | Multi-view/shared state | Two cameras, one world/assets | Missing |
 | glTF PBR + touch tag | One reference GLB and event | Missing |
+| Hero asset | Spinning refractive logo under Flutter UI | Missing |
 | Release engineering | Green required CI and installable artifacts | Steps 1 and 3 gated; packaging remains |
 
 ## 6. Decision rules and risks
@@ -292,11 +415,18 @@ hot-reload demo without a repository checkout or an undocumented dependency.
   assets, and unavailable backends fail visibly with actionable diagnostics.
 - **Avoid dependency drift.** Pin Zig, Flutter, Filament, and generator versions;
   record checksums and upgrade them in isolated changes with full gate runs.
-- **Control RC scope.** Physics, audio, SumiC, and additional platforms are
-  important but cannot enter RC0 unless they close a required gate above.
+- **Control RC scope.** Physics, audio, and additional platforms are important
+  but cannot enter RC0 unless they close a required gate above.
+- **One source per material, always.** A shader that exists twice is a bug with a
+  delay fuse: the copies agree until someone edits one. Step 6 exists to remove
+  the only such pair in the repository and to make adding another impossible.
+- **The language is not the deliverable.** Step 6's outcome is one source
+  reaching every tier. S2L makes that source nicer to write, which is why 6b
+  follows 6a rather than gating it: the conformance corpus must not depend on a
+  parser that is still being built.
 
 The immediate next task is Step 5: promote Filament First Light into a 3D scene
-backend behind the internal backend interface, with `gltfio` owning glTF parsing
-and a pinned Filament distribution vendored under checksum. `EshiView` now has
-the texture lifecycle it will render into, and the diagnostics harnesses above
-are the regression net that work has to keep green.
+backend, vendoring the pinned Filament distribution — which also turns on the
+`matc` half of Step 6a's gate in CI — and using the hero asset's greybox as its
+reference GLB. Step 6a landed first, so that work inherits a generated material
+pipeline rather than a duplicated one.

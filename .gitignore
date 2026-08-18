@@ -16,6 +16,8 @@ clean.py
 .zig-cache/
 zig-out/
 
+resources/filament/
+
 # --- Extras ---
 VENDORED
 sumi

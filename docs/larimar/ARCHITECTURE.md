@@ -469,6 +469,14 @@ bit-exact agreement is not achievable and was never the goal. Note that the
 equality check that answers *"is this tier deterministic?"*, not *"do two tiers
 agree?"* Those need different tools, and conflating them is easy.
 
+That table is now `scripts/check_tier_conformance.sh`, which re-derives it on
+demand and runs in CI. It also covers the Filament tier, which the numbers above
+predate: PLAN Step 6a made Filament materials a *generated* representation of
+the same source rather than a hand-written second copy, so Brush-through-Filament
+is inside the oracle instead of beside it. See
+[`SHADER_SUBSET.md`](SHADER_SUBSET.md) for what the material domain cannot
+express, and why two of the twenty programs stop at Paper and Ink.
+
 **The oracle immediately earned its keep.** The first cross-tier run showed
 Paper diverging from Ink and growing worse over time. The cause: `glReadPixels`
 returns rows bottom-up, and the readback was copying them straight through, so
@@ -492,9 +500,11 @@ point's signature — a helper function cannot see it.
 
 - `core/src/render/filament.cpp` implements the existing backend vtable with a
   headless offscreen Filament view. Brush selects it in Filament-enabled builds.
-- `examples/pong/pong.mat` is compiled by `matc` during `zig build larimar
+- The material is compiled by `matc` during `zig build larimar
   -Dfilament=true`; the backend uploads the same opaque uniform float block used
-  by the lightweight GPU tiers.
+  by the lightweight GPU tiers. As of PLAN Step 6a the `.mat` handed to `matc`
+  is generated from `pong.gpu.cpp` by `eshi-matgen` rather than written by hand,
+  so First Light's material is the same file the other tiers read.
 - The First Light readback preserves the framebuffer contract and pixel-matches
   Ink. A Flutter hardware-texture host can later remove that copy without
   changing the ECS or game API.
@@ -633,7 +643,10 @@ it is the tier below Filament's floor, and §7 is ordered accordingly.
 
 **Settled:** the Rust monorepo is context, not a dependency. Nothing in
 `resources/gyosho` is linked, vendored, or ported wholesale. S2L's ideas move
-into the C++ side; its implementation does not.
+into the C++ side; its implementation does not. Refined by PLAN Step 6b: `sumic`
+may be *invoked* as a source generator on a dev machine or in CI, emitting the
+C++ subset that is checked in. That is §4's build-time-only row, not a
+dependency — a consumer build never sees Rust, and the runtime never links it.
 
 Still open, before Phase 1:
 
@@ -646,7 +659,8 @@ Still open, before Phase 1:
 3. Filament `FeatureLevel` ↔ Kantei `Grade` — verify the mapping in §2.
 4. `.mat` expressive limits vs. the gallery corpus — verify before designing the
    `.mat` emitter (§3).
-5. **Specify the C++ shader subset.** It already exists implicitly: it is
+5. **Specify the C++ shader subset.** *(Answered by PLAN Step 6a; see
+   [`SHADER_SUBSET.md`](SHADER_SUBSET.md).)* It already exists implicitly: it is
    whatever survives the `replaceAll` passes in `renderer_gl.h` and
    `renderer_metal.mm`, and 20 programs already conform to it. Writing it down
    is the cheapest possible version of "define S2L", and it has to happen before

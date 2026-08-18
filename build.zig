@@ -116,18 +116,75 @@ pub fn build(b: *std.Build) void {
     const eshi_step = b.step("eshi", "Build and install only the main eshi executable");
     const examples_step = b.step("examples", "Build and install all example executables");
 
+    // Build-time tools. Neither links a backend or a host: matgen reads a
+    // shader through the same transpiler the runtime uses, and ppmdiff reads
+    // frames a host already dumped.
+    const matgen = addToolExecutable(b, .{
+        .name = "eshi-matgen",
+        .sources = &.{ "core/tools/matgen.cpp", "core/src/render/transpile.cpp" },
+        .target = target,
+        .optimize = optimize,
+    });
+    const ppmdiff = addToolExecutable(b, .{
+        .name = "eshi-ppmdiff",
+        .sources = &.{"core/tools/ppmdiff.cpp"},
+        .target = target,
+        .optimize = optimize,
+    });
+    const matgen_install = b.addInstallArtifact(matgen, .{});
+    const ppmdiff_install = b.addInstallArtifact(ppmdiff, .{});
+    const tools_step = b.step("tools", "Build the material generator and the frame comparator");
+    tools_step.dependOn(&matgen_install.step);
+    tools_step.dependOn(&ppmdiff_install.step);
+    b.getInstallStep().dependOn(&matgen_install.step);
+    b.getInstallStep().dependOn(&ppmdiff_install.step);
+
     // Larimar: the Phase 0 engine core plus its hosts. Built independently of
     // the shadertoy gallery above so neither path can break the other.
+    // Every material has exactly one definition: the shader source the Ink tier
+    // compiles and the GPU tiers transpile. matgen re-expresses it as a Filament
+    // material and matc packages that, so no .mat exists as a file anybody can
+    // edit — or forget to edit.
+    const MaterialPackage = struct {
+        fn build(
+            owner: *std.Build,
+            tool: *std.Build.Step.Compile,
+            matc_path: []const u8,
+            source: []const u8,
+            name: []const u8,
+            uniform_floats: []const u8,
+        ) std.Build.LazyPath {
+            const generate = owner.addRunArtifact(tool);
+            generate.addFileArg(owner.path(source));
+            generate.addArgs(&.{ "--uniform-floats", uniform_floats, "-o" });
+            const material = generate.addOutputFileArg(owner.fmt("{s}.mat", .{name}));
+
+            const matc = owner.addSystemCommand(&.{ matc_path, "-p", "all", "-a", "all", "-o" });
+            const output = matc.addOutputFileArg(owner.fmt("{s}.filamat", .{name}));
+            matc.addFileArg(material);
+            return output;
+        }
+    };
+
+    const matc_path = b.pathJoin(&.{ filament_path, "bin", "matc" });
     const pong_package_path: ?[]const u8 = if (use_filament)
         b.getInstallPath(.prefix, "share/eshi/pong.filamat")
     else
         null;
-    const pong_package: ?std.Build.LazyPath = if (use_filament) package: {
-        const matc = b.addSystemCommand(&.{b.pathJoin(&.{ filament_path, "bin", "matc" }), "-p", "all", "-a", "all", "-o"});
-        const output = matc.addOutputFileArg("pong.filamat");
-        matc.addFileArg(b.path("examples/pong/pong.mat"));
-        break :package output;
-    } else null;
+    const gallery_package_path: ?[]const u8 = if (use_filament)
+        b.getInstallPath(.prefix, "share/eshi/ripple.filamat")
+    else
+        null;
+    const pong_package: ?std.Build.LazyPath = if (use_filament)
+        MaterialPackage.build(b, matgen, matc_path, "examples/pong/pong.gpu.cpp", "pong", "64")
+    else
+        null;
+    // The gallery half of the same claim: ripple reaches Filament from the file
+    // Ink compiles, with nothing written twice on the way.
+    const gallery_package: ?std.Build.LazyPath = if (use_filament)
+        MaterialPackage.build(b, matgen, matc_path, "examples/ripple.cpp", "ripple", "0")
+    else
+        null;
 
     const larimar_install = addLarimarExecutable(b, .{
         .name = "pong",
@@ -144,6 +201,7 @@ pub fn build(b: *std.Build) void {
         .filament_path = filament_path,
         .filament_arch = filament_arch,
         .pong_package_path = pong_package_path,
+        .gallery_package_path = gallery_package_path,
         .use_lto = use_lto,
     });
     const larimar_step = b.step("larimar", "Build the Larimar core and the SDL host (pong)");
@@ -151,13 +209,16 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&larimar_install.step);
     if (pong_package) |package| {
         const install_package = b.addInstallFile(package, "share/eshi/pong.filamat");
+        const install_gallery = b.addInstallFile(gallery_package.?, "share/eshi/ripple.filamat");
         const install_filament_license = b.addInstallFile(
             pathFromOption(b, b.pathJoin(&.{ filament_path, "LICENSE" })),
             "share/licenses/filament/LICENSE",
         );
         larimar_step.dependOn(&install_package.step);
+        larimar_step.dependOn(&install_gallery.step);
         larimar_step.dependOn(&install_filament_license.step);
         b.getInstallStep().dependOn(&install_package.step);
+        b.getInstallStep().dependOn(&install_gallery.step);
         b.getInstallStep().dependOn(&install_filament_license.step);
     }
 
@@ -202,6 +263,14 @@ pub fn build(b: *std.Build) void {
     const sanitized_test_step = b.step("test-sanitize", "Run core tests under ASan and UBSan");
     sanitized_test_step.dependOn(&sanitized_test_command.step);
 
+    const conformance_command = b.addSystemCommand(&.{"./scripts/check_tier_conformance.sh"});
+    conformance_command.step.dependOn(&ppmdiff_install.step);
+    const conformance_step = b.step(
+        "conformance",
+        "Compare the render tiers frame by frame (requires a built pong)",
+    );
+    conformance_step.dependOn(&conformance_command.step);
+
     const main_install = addEshiExecutable(b, .{
         .name = "eshi",
         .shader_source = "shader.cpp",
@@ -225,7 +294,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .sumi_include = sumi_include,
-            .libomp_prefix = libomp_prefix,
+                .libomp_prefix = libomp_prefix,
             .use_metal = use_metal,
             .use_opengl = use_opengl,
             .use_openmp = use_openmp,
@@ -364,6 +433,7 @@ const LarimarOptions = struct {
     filament_path: []const u8,
     filament_arch: []const u8,
     pong_package_path: ?[]const u8,
+    gallery_package_path: ?[]const u8,
     use_lto: bool,
 };
 
@@ -433,6 +503,9 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
         module.addCMacro("ESHI_HAVE_FILAMENT", "1");
         if (options.pong_package_path) |package_path| {
             module.addCMacro("ESHI_PONG_PACKAGE_PATH", b.fmt("\"{s}\"", .{package_path}));
+        }
+        if (options.gallery_package_path) |package_path| {
+            module.addCMacro("ESHI_GALLERY_PACKAGE_PATH", b.fmt("\"{s}\"", .{package_path}));
         }
         module.addSystemIncludePath(pathFromOption(b, b.pathJoin(&.{ options.filament_path, "include" })));
         module.addLibraryPath(pathFromOption(b, b.pathJoin(&.{ options.filament_path, "lib", options.filament_arch })));
@@ -507,6 +580,41 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
     exe.lto = if (options.use_lto) .full else .none;
 
     return b.addInstallArtifact(exe, .{});
+}
+
+const ToolOptions = struct {
+    name: []const u8,
+    sources: []const []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+};
+
+/// A host-side tool: C++ and libc++ only, no SDL, no FFmpeg, no backend.
+///
+/// These run on a build machine, never on a device, so they take none of the
+/// options the runtime executables carry. If one of them ever needs a system
+/// package, it has stopped being a tool.
+fn addToolExecutable(b: *std.Build, options: ToolOptions) *std.Build.Step.Compile {
+    const module = b.createModule(.{
+        .target = options.target,
+        .optimize = options.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    module.addIncludePath(b.path("core/include"));
+    module.addCSourceFiles(.{
+        .files = options.sources,
+        .flags = &.{ "-std=c++11", "-Wall", "-Wextra" },
+        .language = .cpp,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = options.name,
+        .root_module = module,
+        .use_llvm = true,
+    });
+    exe.lto = .none;
+    return exe;
 }
 
 fn pathFromOption(b: *std.Build, path: []const u8) std.Build.LazyPath {

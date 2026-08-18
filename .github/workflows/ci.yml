@@ -56,6 +56,21 @@ jobs:
           GALLIUM_DRIVER: llvmpipe
         run: xvfb-run -a ./scripts/check_gpu_shaders.sh
 
+      # Compiling is not agreeing. The transpiler can produce a shader that
+      # builds cleanly and draws the wrong picture — an inverted axis, a lost
+      # swizzle — and only a pixel comparison against the CPU tier catches that.
+      # llvmpipe is slow and entirely adequate: the assertion is agreement, not
+      # frame rate.
+      - name: Paper and Ink agree to 1 LSB
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+          LARIMAR_CONFORMANCE_FRAMES: '20'
+          LARIMAR_CONFORMANCE_RES: 160x90
+        run: |
+          zig build larimar tools -Dopengl=true -Dopenmp=false
+          xvfb-run -a ./scripts/check_tier_conformance.sh
+
   # The other half of the transpiler check. Its GLSL and MSL rules diverged
   # repeatedly — a missing glsl:: strip, a hardcoded swizzle list, atan2f
   # mapped to the wrong builtin — each time compiling cleanly on one target
@@ -106,6 +121,17 @@ jobs:
       - name: Validate every shader reaches the Metal backend
         if: steps.metal.outputs.available == 'true'
         run: ./scripts/check_gpu_shaders.sh
+
+      - name: Brush and Ink agree to 1 LSB
+        if: steps.metal.outputs.available == 'true'
+        run: ./scripts/check_tier_conformance.sh
+
+      # The .mat emitter, without Filament. matc lives in a distribution this
+      # job does not have yet — vendoring one is a Step 5 bullet — so this
+      # checks that every shader still produces a material and that the two
+      # documented refusals are still exactly the two.
+      - name: Emit a Filament material for every shader
+        run: ./scripts/check_materials.sh
 
       - name: Larimar core tests
         run: zig build test
