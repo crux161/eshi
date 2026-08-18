@@ -39,6 +39,24 @@ jobs:
       - name: Fetch libsumi
         run: ./scripts/vendor.sh
 
+      # Pinned by scripts/vendor_filament.sh and verified by checksum. Cached
+      # on the version, so an upgrade is a cache miss rather than a stale hit.
+      - name: Cache the Filament distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/filament
+          key: filament-${{ runner.os }}-v1.75.0
+
+      - name: Vendor Filament
+        run: ./scripts/vendor_filament.sh
+
+      # matc is a build-time tool, so this half of the material gate needs no
+      # GPU and runs on the Linux job as well as the macOS one.
+      - name: Compile a Filament material for every shader
+        run: |
+          zig build tools
+          ./scripts/check_materials.sh
+
       - name: Build with the OpenGL backend
         # This job gates the GPU/transpiler path. Keep the CPU OpenMP backend
         # out of this build so a runner's GCC runtime layout cannot prevent the
@@ -55,6 +73,21 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
           GALLIUM_DRIVER: llvmpipe
         run: xvfb-run -a ./scripts/check_gpu_shaders.sh
+
+      # Compiling is not agreeing. The transpiler can produce a shader that
+      # builds cleanly and draws the wrong picture — an inverted axis, a lost
+      # swizzle — and only a pixel comparison against the CPU tier catches that.
+      # llvmpipe is slow and entirely adequate: the assertion is agreement, not
+      # frame rate.
+      - name: Paper and Ink agree to 1 LSB
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+          LARIMAR_CONFORMANCE_FRAMES: '20'
+          LARIMAR_CONFORMANCE_RES: 160x90
+        run: |
+          zig build larimar tools -Dopengl=true -Dopenmp=false
+          xvfb-run -a ./scripts/check_tier_conformance.sh
 
   # The other half of the transpiler check. Its GLSL and MSL rules diverged
   # repeatedly — a missing glsl:: strip, a hardcoded swizzle list, atan2f
@@ -75,6 +108,15 @@ jobs:
 
       - name: Fetch libsumi
         run: ./scripts/vendor.sh
+
+      - name: Cache the Filament distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/filament
+          key: filament-${{ runner.os }}-v1.75.0
+
+      - name: Vendor Filament
+        run: ./scripts/vendor_filament.sh
 
       # Metal is on by default here and LTO is off by default on macOS, since
       # Zig's LLD cannot link Mach-O with it.
@@ -106,6 +148,30 @@ jobs:
       - name: Validate every shader reaches the Metal backend
         if: steps.metal.outputs.available == 'true'
         run: ./scripts/check_gpu_shaders.sh
+
+      - name: Brush and Ink agree to 1 LSB
+        if: steps.metal.outputs.available == 'true'
+        run: ./scripts/check_tier_conformance.sh
+
+      # Every shader still produces a material, the two documented refusals are
+      # still exactly two, and matc accepts the other eighteen.
+      - name: Compile a Filament material for every shader
+        run: ./scripts/check_materials.sh
+
+      # The Brush tier through Filament rather than direct Metal, from the same
+      # generated materials, against the same CPU reference.
+      - name: Filament and Ink agree to 1 LSB
+        if: steps.metal.outputs.available == 'true'
+        run: |
+          zig build larimar tools -Dfilament=true
+          ./scripts/check_tier_conformance.sh
+
+      # glTF through gltfio, and the failure paths that matter more than the
+      # happy one: an empty scene must not pass for a drawn one, and a missing
+      # or corrupt asset must be refused by name.
+      - name: The reference asset loads, instances, and draws
+        if: steps.metal.outputs.available == 'true'
+        run: ./scripts/check_asset_render.sh
 
       - name: Larimar core tests
         run: zig build test
@@ -208,14 +274,14 @@ jobs:
       - name: Check generated bindings
         working-directory: bindings/dart/larimar
         run: |
-          dart pub get
+          flutter pub get
           ../../../scripts/check_dart_bindings.sh
 
-      - name: Analyze and test the Dart package
+      - name: Analyze and test the Flutter FFI package
         working-directory: bindings/dart/larimar
         run: |
-          dart analyze
-          dart test --reporter expanded
+          flutter analyze
+          flutter test --reporter expanded
 
       - name: Analyze and test the Flutter reference app
         working-directory: examples/larimar_flutter
@@ -236,12 +302,12 @@ jobs:
           flutter-version: 3.38.9
           cache: true
 
-      - name: Analyze and test the Dart package
+      - name: Analyze and test the Flutter FFI package
         working-directory: bindings/dart/larimar
         run: |
-          dart pub get
-          dart analyze
-          dart test --reporter expanded
+          flutter pub get
+          flutter analyze
+          flutter test --reporter expanded
 
       - name: Analyze and test the Flutter reference app
         working-directory: examples/larimar_flutter
@@ -249,3 +315,29 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test --reporter expanded
+
+      # The texture adapter's own gate, with no engine in the way. `leaks
+      # --atExit` reports any surface the adapter failed to release, and the
+      # ThreadSanitizer pass reports any unsynchronised access between the
+      # platform thread and the raster queue. Removing the surface lock from
+      # LarimarPlugin.mm makes the second pass fail, which is the point: the
+      # engine-level test below cannot distinguish a held lock from a lucky one.
+      - name: Texture host under leak and race diagnostics
+        run: ./scripts/check_eshiview_host.sh
+
+      # The engine-level half. The reference application really does create,
+      # resize, background, foreground and destroy an EshiView, and `leaks`
+      # snapshots the process from outside the App Sandbox — a sandboxed process
+      # cannot open its own task port — after the first cycle and after the
+      # last. Growth between the two is the leak, not the absolute count: the
+      # OS frameworks arrive with leaks of their own.
+      - name: EshiView lifecycle under leak diagnostics
+        run: ./scripts/check_eshiview_lifecycle.sh
+
+      - name: Keep the diagnostics and the composited frames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eshiview-diagnostics
+          path: build/larimar-diagnostics
+          if-no-files-found: warn

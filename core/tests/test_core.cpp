@@ -117,6 +117,42 @@ void test_material_and_render() {
     eshi_world_destroy(w);
 }
 
+void test_assets_on_a_backend_without_a_scene() {
+    std::printf("assets on a backend without a scene\n");
+    EshiWorld* w = make_world();
+
+    /*
+     * Ink has no 3D scene and says so. The distinction matters: a host that
+     * asks for geometry on a CPU tier must get a refusal it can act on, not a
+     * success followed by an empty frame.
+     */
+    EshiAsset asset = 12345;
+    check(eshi_asset_load(w, "examples/assets/nothing.glb", &asset) == ESHI_ERR_UNSUPPORTED,
+          "Ink reports that it has no 3D scene");
+    check(asset == 12345, "a refused load leaves the caller's handle alone");
+    check(eshi_asset_count(w) == 0, "a backend without assets counts none");
+
+    check(eshi_asset_load(NULL, "a.glb", &asset) == ESHI_ERR_INVALID,
+          "loading into no world is refused");
+    check(eshi_asset_load(w, NULL, &asset) == ESHI_ERR_INVALID,
+          "loading no path is refused");
+    check(eshi_asset_load(w, "a.glb", NULL) == ESHI_ERR_INVALID,
+          "loading without somewhere to put the handle is refused");
+    check(eshi_asset_instance(w, 0, 0.0f, 0.0f, 0.0f, 1.0f) == ESHI_ERR_INVALID,
+          "instancing the null asset is refused");
+    check(eshi_asset_instance_animated(w, 1, 0.0f, 0.0f, 0.0f, 1.0f, 0.3f) ==
+                  ESHI_ERR_UNSUPPORTED,
+          "an animated instance reports that Ink has no scene");
+    check(eshi_asset_instance_animated(NULL, 1, 0.0f, 0.0f, 0.0f, 1.0f, 0.3f) ==
+                  ESHI_ERR_INVALID,
+          "an animated instance rejects a null world");
+    check(eshi_asset_release(w, 0) == ESHI_ERR_INVALID,
+          "releasing the null asset is refused");
+    check(eshi_asset_count(NULL) == 0, "counting no world is zero, not a crash");
+
+    eshi_world_destroy(w);
+}
+
 void test_shader_transpile_builtin_overloads() {
     std::printf("shader builtin overloads\n");
 
@@ -980,6 +1016,7 @@ int main() {
     test_scene_epoch_gate();
     test_scene_spans_flushes();
     test_event_buffer();
+    test_assets_on_a_backend_without_a_scene();
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

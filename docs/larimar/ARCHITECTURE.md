@@ -337,12 +337,15 @@ to Dart as a `Float32List`/`Int32List` via `asTypedList`, let Dart write packed
 commands into it, and cross the boundary **once** per frame with
 `eshi_flush(count)`. Same trick in reverse for the event queue. Bulk in, bulk out.
 
-**6.8 — Don't build Filament from source in-tree.** It is a large CMake project
-with its own toolchain expectations and would dominate the build. Consume the
-official per-platform prebuilt release archives via a fetch script following the
-existing `scripts/vendor.sh` pattern. License is Apache-2.0, compatible with
-eshi's MIT — but the NOTICE obligations are real and need a `third_party/`
-attribution file.
+**6.8 — Don't build Filament from source in-tree.** *(Landed;
+`scripts/vendor_filament.sh`.)* It is a large CMake project with its own
+toolchain expectations and would dominate the build. Consume the official
+per-platform prebuilt release archives via a fetch script following the existing
+`scripts/vendor.sh` pattern. License is Apache-2.0, compatible with eshi's MIT —
+but the NOTICE obligations are real and need a `third_party/` attribution file.
+The script pins v1.75.0 and verifies its SHA-256 before extracting; the checksum
+is what makes the pin mean anything, and the negative control is a different
+version's archive being refused rather than quietly installed.
 
 **6.9 — Terminology.** `matc` is the *compiler*; the input is a `.mat` file, the
 output is a `.filamat` package. "Output Filament's `matc` syntax" should read
@@ -469,6 +472,14 @@ bit-exact agreement is not achievable and was never the goal. Note that the
 equality check that answers *"is this tier deterministic?"*, not *"do two tiers
 agree?"* Those need different tools, and conflating them is easy.
 
+That table is now `scripts/check_tier_conformance.sh`, which re-derives it on
+demand and runs in CI. It also covers the Filament tier, which the numbers above
+predate: PLAN Step 6a made Filament materials a *generated* representation of
+the same source rather than a hand-written second copy, so Brush-through-Filament
+is inside the oracle instead of beside it. See
+[`SHADER_SUBSET.md`](SHADER_SUBSET.md) for what the material domain cannot
+express, and why two of the twenty programs stop at Paper and Ink.
+
 **The oracle immediately earned its keep.** The first cross-tier run showed
 Paper diverging from Ink and growing worse over time. The cause: `glReadPixels`
 returns rows bottom-up, and the readback was copying them straight through, so
@@ -492,9 +503,11 @@ point's signature — a helper function cannot see it.
 
 - `core/src/render/filament.cpp` implements the existing backend vtable with a
   headless offscreen Filament view. Brush selects it in Filament-enabled builds.
-- `examples/pong/pong.mat` is compiled by `matc` during `zig build larimar
+- The material is compiled by `matc` during `zig build larimar
   -Dfilament=true`; the backend uploads the same opaque uniform float block used
-  by the lightweight GPU tiers.
+  by the lightweight GPU tiers. As of PLAN Step 6a the `.mat` handed to `matc`
+  is generated from `pong.gpu.cpp` by `eshi-matgen` rather than written by hand,
+  so First Light's material is the same file the other tiers read.
 - The First Light readback preserves the framebuffer contract and pixel-matches
   Ink. A Flutter hardware-texture host can later remove that copy without
   changing the ECS or game API.
@@ -503,7 +516,7 @@ point's signature — a helper function cannot see it.
 
 ### Phase 2 — SDL3 + host hardening (§6.10)
 
-### Phase 3 — Dart — **native half landed**
+### Phase 3 — Dart — **package and macOS texture host landed**
 
 The two subsystems §6.6 and §6.7 describe are built, tested, and proven against
 Pong. They were built *before* Dart deliberately: both are testable in C++ with
@@ -520,8 +533,8 @@ gets a vote on its shape.
 | Bulk event drain (§6.7) | `core/src/scene.cpp` | Done — same framing in reverse; overflow reported, not truncated |
 | C++ encoder/decoder | `core/include/eshi/scene.hpp` | Done — header-only, and the executable spec of the format |
 | Pong on the reconciler | `examples/pong/pong.cpp` | Done — the scene is a description, not a sequence of `eshi_entity_create()` calls |
-| `ffigen` bindings from `eshi.h` | — | Not started |
-| Flutter embedder + external texture, macOS first (§6.11) | — | Not started |
+| `ffigen` bindings from `eshi.h` | `bindings/dart/larimar` | Done — generated ABI bindings, owned world/buffers, golden codecs, drift gate |
+| Flutter embedder + external texture, macOS first (§6.11) | `bindings/dart/larimar/macos` | Done — IOSurface/CVPixelBuffer/Metal texture, direct Brush submission, and a lifecycle loop gated under `leaks`, ThreadSanitizer, and a composited frame capture |
 
 Four things came out of building it that were not obvious from §6.6.
 
@@ -555,6 +568,22 @@ reconciler and the game argue over the ball every reload. The rule that fell out
 — *describe what the scene is, let systems own what it is doing* — is the one the
 Dart layer will have to follow too, and it is easier to state now than to
 retrofit once widgets are writing scene descriptions.
+
+**The texture host needed a harness the engine could not provide.** The
+integration test drives a real `EshiView` through real create/resize/background/
+destroy cycles, and it cannot tell a held lock from a lucky one: Flutter's raster
+thread borrows the surface on its own schedule, so a missing lock is a timing
+question the test happens to win. `check_eshiview_host.sh` removes the engine
+instead of the concurrency — the real plugin, its real method-channel entry
+points, a stand-in registry that keeps Flutter's thread contract, and
+ThreadSanitizer watching both sides. Deleting the surface lock turns it red at
+the resize; the engine-level test stays green. The same harness under
+`leaks --atExit` answers the leak question the sandboxed application cannot ask
+about itself. Its first run reported every surface still alive after disposal,
+which was the harness missing the per-cycle autorelease pool a run loop would
+have given it — worth stating because it is the failure mode of any host-free
+harness: the thing under test is only as honest as the environment you rebuild
+around it.
 
 One deliberate call worth flagging for review: an opcode the core does not
 implement stops the flush with `ESHI_ERR_UNSUPPORTED` rather than being skipped.
@@ -617,7 +646,10 @@ it is the tier below Filament's floor, and §7 is ordered accordingly.
 
 **Settled:** the Rust monorepo is context, not a dependency. Nothing in
 `resources/gyosho` is linked, vendored, or ported wholesale. S2L's ideas move
-into the C++ side; its implementation does not.
+into the C++ side; its implementation does not. Refined by PLAN Step 6b: `sumic`
+may be *invoked* as a source generator on a dev machine or in CI, emitting the
+C++ subset that is checked in. That is §4's build-time-only row, not a
+dependency — a consumer build never sees Rust, and the runtime never links it.
 
 Still open, before Phase 1:
 
@@ -630,7 +662,8 @@ Still open, before Phase 1:
 3. Filament `FeatureLevel` ↔ Kantei `Grade` — verify the mapping in §2.
 4. `.mat` expressive limits vs. the gallery corpus — verify before designing the
    `.mat` emitter (§3).
-5. **Specify the C++ shader subset.** It already exists implicitly: it is
+5. **Specify the C++ shader subset.** *(Answered by PLAN Step 6a; see
+   [`SHADER_SUBSET.md`](SHADER_SUBSET.md).)* It already exists implicitly: it is
    whatever survives the `replaceAll` passes in `renderer_gl.h` and
    `renderer_metal.mm`, and 20 programs already conform to it. Writing it down
    is the cheapest possible version of "define S2L", and it has to happen before

@@ -357,6 +357,12 @@ const EshiBackendVTable kGlVTable = {
     gl_create,
     gl_destroy,
     gl_render,
+    NULL,
+    /* No 3D scene: assets are refused rather than half-supported. */
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 } /* namespace */

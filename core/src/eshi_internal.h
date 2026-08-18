@@ -54,8 +54,9 @@ void eshi__frame_params(EshiWorld* w,
  * table here and nothing else.
  * -------------------------------------------------------------------------*/
 typedef struct EshiBackend EshiBackend;
+typedef struct EshiBackendVTable EshiBackendVTable;
 
-typedef struct EshiBackendVTable {
+struct EshiBackendVTable {
     const char* name;
 
     /** Probes whether this backend can run right now. */
@@ -76,13 +77,69 @@ typedef struct EshiBackendVTable {
                          uint8_t* pixels, int32_t stride, float time,
                          EshiShaderFn cpu_shader,
                          const void* uniforms, size_t uniform_size);
-} EshiBackendVTable;
+
+    /** Renders directly into a borrowed host Metal texture, when supported. */
+    EshiResult (*render_texture)(EshiBackend* backend,
+                                 void* metal_texture,
+                                 void* pixel_buffer,
+                                 int32_t width, int32_t height,
+                                 float time,
+                                 const void* uniforms, size_t uniform_size);
+
+    /*
+     * 3D scene operations, and the first place the vtable stops being uniform.
+     *
+     * A backend that has no scene leaves these NULL and the world answers
+     * ESHI_ERR_UNSUPPORTED — which is the honest answer for Ink, Paper, and
+     * direct Metal, all of which render a fullscreen material and nothing
+     * else. Making them optional keeps the capability ladder in the vtable
+     * rather than in a grade comparison somewhere else.
+     */
+
+    /** Parses and uploads a glTF/GLB. Writes a nonzero handle on success. */
+    EshiResult (*asset_load)(EshiBackend* backend, const char* path,
+                             uint32_t* out_asset);
+
+    /** Adds one instance of a loaded asset to the backend's scene. */
+    EshiResult (*asset_instance)(EshiBackend* backend, uint32_t asset,
+                                 float x, float y, float z, float scale,
+                                 float radians_per_second);
+
+    /** Releases an asset and its instances. */
+    EshiResult (*asset_release)(EshiBackend* backend, uint32_t asset);
+
+    /** Assets currently loaded, for hosts and tests that ask. */
+    uint32_t (*asset_count)(const EshiBackend* backend);
+};
+
+/**
+ * Borrows the world's selected backend. Host adapters use this only to route
+ * an opaque platform render target to the matching private backend entry
+ * point; neither value is part of the installed C ABI.
+ */
+EshiBackend* eshi__world_backend(EshiWorld* w,
+                                 const EshiBackendVTable** out_vtable);
 
 /* Implemented per backend; the unavailable ones compile to stubs. */
 const EshiBackendVTable* eshi__backend_ink(void);
 const EshiBackendVTable* eshi__backend_gl(void);
 const EshiBackendVTable* eshi__backend_metal(void);
 const EshiBackendVTable* eshi__backend_filament(void);
+
+/**
+ * Renders into a borrowed macOS surface. Direct Metal uses `metal_texture`;
+ * Filament uses `pixel_buffer` as an Apple CVPixelBuffer swapchain.
+ *
+ * This symbol is intentionally absent from eshi.h: it is consumed only by the
+ * macOS Flutter host. The caller retains the texture until the synchronous
+ * submission completes.
+ */
+EshiResult eshi__metal_render_texture(EshiWorld* w,
+                                      void* metal_texture,
+                                      void* pixel_buffer,
+                                      int32_t width,
+                                      int32_t height,
+                                      float time);
 
 /** Maps a grade to its table, or NULL if the grade has no backend here. */
 const EshiBackendVTable* eshi__backend_for_grade(EshiGrade grade);

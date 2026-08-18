@@ -254,7 +254,7 @@ void reload(EshiWorld* w, Game* g) {
     }
 }
 
-void build(EshiWorld* w, Game* g) {
+EshiResult build(EshiWorld* w, Game* g) {
     g->score_l = 0;
     g->score_r = 0;
     g->uniforms.hit_timer = 0.0f;
@@ -292,7 +292,14 @@ void build(EshiWorld* w, Game* g) {
 #endif
     material.uniform_data = &g->uniforms;
     material.uniform_size = sizeof(g->uniforms);
-    eshi_material_set(w, &material);
+
+    /*
+     * Returned rather than swallowed. A GPU tier that cannot find or compile
+     * this material leaves the world with no backend, and every subsequent
+     * frame is black — which previously reached the screen as a running game
+     * with an empty arena, and reached a script as exit code zero.
+     */
+    return eshi_material_set(w, &material);
 }
 
 /* ---------------------------------------------------------------------------

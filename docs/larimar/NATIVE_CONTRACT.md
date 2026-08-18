@@ -69,9 +69,56 @@ synchronously from `eshi_tick()` on the calling/world thread.
 
 The result-string and grade-probe functions do not use a world. The OpenGL proc
 loader is process-global: install it before creating Paper-grade worlds and do
-not replace it while such a world is in use. The future Flutter host must marshal
-view resize, render, and disposal to its render thread; it must not call through
-a stale Dart isolate after disposal.
+not replace it while such a world is in use.
+
+A macOS consumer may carry both Brush implementations. A source-backed
+fullscreen material selects direct Metal when it is bound; a package-backed or
+3D-only world selects Filament. This keeps the grade stable while allowing the
+Pong reference and glTF scenes to coexist in one application binary.
+
+On macOS, `EshiView` treats the creating Dart isolate as the render-submission
+thread. Its ticker updates the world and calls the private Metal target entry
+point synchronously on that isolate. Texture registration, resize,
+frame-available, suspend/resume, and disposal are serialized through the
+platform channel, whose handler runs on Flutter's platform thread. Flutter's
+raster thread never calls the core; it only calls `copyPixelBuffer` under the
+adapter's surface lock.
+
+Each view owns its Flutter texture ID, IOSurface-backed `CVPixelBuffer`, and
+borrowed `id<MTLTexture>`. Resize atomically swaps that pair. Direct Metal
+borrows the texture; Filament temporarily retains the pixel buffer as an Apple
+CVPixelBuffer swapchain, which is the supported zero-readback path for a BGRA
+surface. The raster thread
+receives an owning pixel-buffer reference, so it may finish consuming the old
+surface after a resize. A synchronous Metal submission must finish before the
+host announces the frame, and no world or borrowed texture handle may be used
+after view/world disposal. Independent views may share a world only when their
+frame submissions are serialized on that world's owner isolate.
+
+## Assets
+
+`EshiAsset` is an opaque handle. Loading parses and uploads once; instancing
+places copies that share that upload, so a second instance costs a transform
+rather than a second copy of the mesh. Both belong to the world's backend and
+are released with it, so a host that exits need not release them by hand.
+
+Geometry is a capability. A backend without a 3D scene — Ink, Paper, direct
+Metal — leaves the asset entry points unimplemented and every asset call
+returns `ESHI_ERR_UNSUPPORTED`. A missing or unparsable file returns
+`ESHI_ERR_INVALID` after naming the file on stderr, and asking for more
+instances than the asset reserved returns `ESHI_ERR_LIMIT`. A failed load
+leaves the caller's handle untouched and the world renderable.
+
+Scene conventions are glTF's own: right-handed, Y up, metres. The backend
+installs a 45° vertical field of view, a photographic exposure, and one
+directional light at daylight intensity. Image-based lighting is not in yet,
+which is why a fully metallic material renders dark.
+
+`eshi_asset_instance_animated` adds a root-space Y rotation rate to an
+instance. The backend evaluates it while submitting the frame, so Dart declares
+the spin once rather than crossing FFI with a matrix every frame. This is the
+hero prototype's narrow animation seam; the retained-scene `AngularVelocity`
+component in Step 8 remains the general simulation API.
 
 ## Errors and capacity
 

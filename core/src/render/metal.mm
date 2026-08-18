@@ -216,14 +216,83 @@ EshiResult metal_render(EshiBackend* handle,
     return ESHI_OK;
 }
 
+EshiResult metal_render_texture(EshiBackend* handle,
+                                void* metal_texture,
+                                void* pixel_buffer,
+                                int32_t width, int32_t height,
+                                float time,
+                                const void* uniforms, size_t uniform_size);
+
 const EshiBackendVTable kMetalVTable = {
     "metal",
     metal_available,
     metal_create,
     metal_destroy,
     metal_render,
+    metal_render_texture,
+    /* No 3D scene: assets are refused rather than half-supported. */
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 } /* namespace */
 
 extern "C" const EshiBackendVTable* eshi__backend_metal(void) { return &kMetalVTable; }
+
+namespace {
+
+EshiResult metal_render_texture(EshiBackend* handle,
+                                void* metal_texture,
+                                void* /*pixel_buffer*/,
+                                int32_t width, int32_t height,
+                                float time,
+                                const void* uniforms, size_t uniform_size) {
+    MetalBackend* backend = reinterpret_cast<MetalBackend*>(handle);
+    if (!backend || !metal_texture || width <= 0 || height <= 0) {
+        return ESHI_ERR_INVALID;
+    }
+    id<MTLTexture> output_texture = (__bridge id<MTLTexture>)metal_texture;
+    id<MTLDevice> device = (__bridge id<MTLDevice>)backend->device;
+    if (!output_texture || output_texture.device != device ||
+        output_texture.width != (NSUInteger)width ||
+        output_texture.height != (NSUInteger)height ||
+        !(output_texture.usage & MTLTextureUsageShaderWrite)) {
+        return ESHI_ERR_INVALID;
+    }
+    if (uniform_size > backend->uniform_capacity) return ESHI_ERR_LIMIT;
+
+    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)backend->queue;
+    id<MTLComputePipelineState> pipeline =
+        (__bridge id<MTLComputePipelineState>)backend->pipeline;
+    id<MTLTexture> input_texture = (__bridge id<MTLTexture>)backend->input_texture;
+
+    @autoreleasepool {
+        id<MTLCommandBuffer> command_buffer = [queue commandBuffer];
+        id<MTLComputeCommandEncoder> encoder = [command_buffer computeCommandEncoder];
+        if (!command_buffer || !encoder) return ESHI_ERR_INVALID;
+
+        [encoder setComputePipelineState:pipeline];
+        [encoder setBytes:&time length:sizeof(float) atIndex:0];
+        if (uniforms && uniform_size > 0) {
+            [encoder setBytes:uniforms length:uniform_size atIndex:1];
+        }
+        [encoder setTexture:output_texture atIndex:0];
+        [encoder setTexture:input_texture atIndex:1];
+        [encoder dispatchThreads:MTLSizeMake(output_texture.width,
+                                             output_texture.height, 1)
+           threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
+        [encoder endEncoding];
+        [command_buffer commit];
+        [command_buffer waitUntilCompleted];
+        if (command_buffer.status == MTLCommandBufferStatusError) {
+            std::fprintf(stderr, "[eshi/metal] external texture render failed: %s\n",
+                         [[command_buffer.error localizedDescription] UTF8String]);
+            return ESHI_ERR_INVALID;
+        }
+    }
+    return ESHI_OK;
+}
+
+} /* namespace */

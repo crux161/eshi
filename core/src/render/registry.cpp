@@ -26,7 +26,17 @@ EshiResult   stub_render(EshiBackend*, uint8_t*, int32_t, float,
 }
 
 const EshiBackendVTable kStubVTable = {
-    "unavailable", stub_available, stub_create, stub_destroy, stub_render,
+    "unavailable",
+    stub_available,
+    stub_create,
+    stub_destroy,
+    stub_render,
+    NULL,
+    /* No 3D scene: assets are refused rather than half-supported. */
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 } /* namespace */

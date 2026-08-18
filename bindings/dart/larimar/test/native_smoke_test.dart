@@ -4,7 +4,10 @@ import 'package:test/test.dart';
 void main() {
   test('loads and validates the native contract', () {
     final contract = LarimarContract.current;
-    expect(contract.abiVersion, 1 << 24);
+    // 1.1.0. The minor moved when the asset handles were added: additive, so a
+    // package built against 1.0 still loads, which is what the check in
+    // eshi_abi_check enforces.
+    expect(contract.abiVersion, (1 << 24) | (1 << 16));
     expect(contract.commandProtocolVersion, 1);
     expect(contract.eventProtocolVersion, 1);
   });

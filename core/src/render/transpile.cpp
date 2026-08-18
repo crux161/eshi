@@ -9,6 +9,7 @@
 #include "transpile.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -39,6 +40,25 @@ std::string resolve_path(const std::string& path) {
         const std::string stripped = path.substr(3);
         if (file_exists(stripped)) return stripped;
     }
+
+    /*
+     * Everything above resolves against the working directory, which is fine
+     * inside a source tree and wrong everywhere else: an installed binary run
+     * from anywhere but the repository root would fail to find its shader, and
+     * the GPU tiers would render black frames while the banner still announced
+     * their backend. The install prefix and an environment override are how a
+     * shipped binary finds the sources that ship beside it.
+     */
+    const size_t slash = path.find_last_of("/\\");
+    const std::string leaf = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    if (const char* directory = std::getenv("ESHI_SHADER_DIR")) {
+        const std::string candidate = std::string(directory) + "/" + leaf;
+        if (file_exists(candidate)) return candidate;
+    }
+#ifdef ESHI_SHADER_INSTALL_DIR
+    const std::string installed = std::string(ESHI_SHADER_INSTALL_DIR) + "/" + leaf;
+    if (file_exists(installed)) return installed;
+#endif
     return "";
 }
 
@@ -196,6 +216,31 @@ std::string glsl_rules(std::string line) {
     return line;
 }
 
+/**
+ * Filament binds a material's parameters through a generated `materialParams`
+ * block, so the subset's global array name has to be rewritten to reach it.
+ * Everything else a `.mat` fragment block needs is already GLSL.
+ */
+std::string mat_rules(std::string line) {
+    line = replace_all(line, "eshi_uniforms", "materialParams.eshiUniforms");
+
+    /*
+     * Filament's shader prelude defines PI and HALF_PI before the material's
+     * fragment block, and two shaders in the corpus own those names: lunar
+     * `#define`s PI and seascape declares `const float PI`. The first is a macro
+     * redefinition, the second expands to `const float 3.14159 = ...` and
+     * reports a syntax error a line later, which is a genuinely baffling
+     * diagnostic to receive about a file that compiles everywhere else.
+     *
+     * Renaming the shader's use rather than undefining Filament's is the safe
+     * direction: an #undef would also reach the engine code emitted after this
+     * block. Same treatment the GLSL target already gives the reserved noise
+     * builtins, for the same reason.
+     */
+    static const std::regex prelude_names("\\b(PI|HALF_PI)\\b");
+    return std::regex_replace(line, prelude_names, "eshi_$1");
+}
+
 std::string msl_rules(std::string line, int uniform_floats) {
     /* MSL requires an explicit address space on every reference parameter. */
     line = replace_all(line, "float&", "thread float&");
@@ -307,7 +352,13 @@ std::string read_and_convert(const std::string& resolved, Target target, int uni
             continue;
         }
         line = common_rules(line);
-        line = (target == kTargetGlsl) ? glsl_rules(line) : msl_rules(line, uniform_floats);
+        if (target == kTargetMsl) {
+            line = msl_rules(line, uniform_floats);
+        } else {
+            /* GLSL and .mat share a body dialect; only the wrapper differs. */
+            line = glsl_rules(line);
+            if (target == kTargetMat) line = mat_rules(line);
+        }
         body += line;
         body += "\n";
     }
@@ -317,6 +368,22 @@ std::string read_and_convert(const std::string& resolved, Target target, int uni
         body = replace_all(body, "\nconst ", "\nconstant ");
     }
     return body;
+}
+
+/** `examples/pong/pong.gpu.cpp` -> `eshi_pong`. Metadata only; keep it stable. */
+std::string material_name(const std::string& resolved) {
+    size_t start = resolved.find_last_of("/\\");
+    start = (start == std::string::npos) ? 0 : start + 1;
+    const size_t dot = resolved.find('.', start);
+    const std::string stem = resolved.substr(start, dot == std::string::npos ? dot : dot - start);
+    std::string name = "eshi_";
+    for (size_t i = 0; i < stem.size(); ++i) {
+        const char c = stem[i];
+        const bool allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                             (c >= '0' && c <= '9') || c == '_';
+        name += allowed ? c : '_';
+    }
+    return name;
 }
 
 std::string uniform_binding(Target target, int uniform_floats) {
@@ -345,7 +412,107 @@ bool build_program(const std::string& path,
     const std::string body = read_and_convert(resolved, target, uniform_floats);
     std::ostringstream out;
 
-    if (target == kTargetGlsl) {
+    if (target == kTargetMat) {
+        /*
+         * A material is not a shader with different syntax: Filament owns the
+         * vertex stage, the varyings, the uniform block, and the lighting, and
+         * a fragment block only fills in MaterialInputs. Anything the subset
+         * expresses that this domain has no place for must stop the build.
+         * iChannel0 is the first such thing — the material declares no sampler
+         * and the Filament backend binds no texture — and a silent drop would
+         * render a plausible, wrong picture.
+         */
+        if (body.find("iChannel0") != std::string::npos) {
+            if (out_error) {
+                *out_error = path +
+                             ": samples iChannel0, which the Filament material domain has no "
+                             "binding for in RC0. Give the material a sampler parameter or keep "
+                             "this shader on the Paper and Ink tiers.";
+            }
+            return false;
+        }
+        /*
+         * matc splits a .mat into blocks by counting braces, before any
+         * preprocessing. A shader whose braces only balance *after* the
+         * preprocessor runs — rainforest.cpp opens its march loop inside
+         * `#ifdef LOWQUALITY` and again inside the `#else` — therefore runs the
+         * fragment block past its own closing brace, and matc reports an
+         * unexpected character on a line that looks perfectly fine. Say what
+         * actually happened instead.
+         */
+        if (count_char(body, '{') != count_char(body, '}')) {
+            if (out_error) {
+                *out_error = path +
+                             ": braces balance only after preprocessing, which matc's block "
+                             "parser does not run. Lift the #if out of the braces it opens, or "
+                             "keep this shader on the Paper and Ink tiers.";
+            }
+            return false;
+        }
+
+        const bool has_uniforms = uniform_floats > 0;
+        out << "// Generated from " << path << " by eshi-matgen. Do not edit:\n"
+            << "// the shader source is the single definition of this material.\n"
+            << "material {\n"
+            << "    name : " << material_name(resolved) << ",\n"
+            << "    parameters : [\n";
+        if (has_uniforms) {
+            out << "        {\n"
+                << "            type : float[" << uniform_floats << "],\n"
+                << "            name : eshiUniforms\n"
+                << "        },\n";
+        }
+        out << "        {\n"
+            << "            type : float2,\n"
+            << "            name : eshiResolution\n"
+            << "        },\n"
+            << "        {\n"
+            << "            type : float,\n"
+            << "            name : eshiTime\n"
+            << "        }\n"
+            << "    ],\n"
+            << "    variables : [\n"
+            << "        eshiPosition\n"
+            << "    ],\n"
+            << "    vertexDomain : device,\n"
+            << "    depthWrite : false,\n"
+            << "    depthCulling : false,\n"
+            << "    culling : none,\n"
+            << "    shadingModel : unlit,\n"
+            << "    variantFilter : [ skinning, shadowReceiver, vsm ]\n"
+            << "}\n\n"
+            /*
+             * The device domain gives the fragment stage clip-space position,
+             * which is the only thing the subset's fragCoord can be rebuilt
+             * from. Passing it through a declared variable rather than reading
+             * gl_FragCoord keeps the material portable across Filament's
+             * backends.
+             */
+            << "vertex {\n"
+            << "    void materialVertex(inout MaterialVertexInputs material) {\n"
+            << "        material.eshiPosition.xy = getPosition().xy;\n"
+            << "    }\n"
+            << "}\n\n"
+            << "fragment {\n"
+            << kMathPreamble
+            << kGlslMathPreamble
+            << body
+            << "\nvoid material(inout MaterialInputs material) {\n"
+            << "    prepareMaterial(material);\n"
+            << "    vec2 iResolution = materialParams.eshiResolution;\n"
+            << "    float iTime = materialParams.eshiTime;\n"
+            /*
+             * Clip space is [-1, 1]; the subset's fragCoord is in pixels with
+             * the same origin the GL tier's gl_FragCoord uses, so the tiers see
+             * one coordinate system and stay comparable pixel for pixel.
+             */
+            << "    vec2 fragCoord = (variable_eshiPosition.xy * 0.5 + 0.5) * iResolution;\n"
+            << "    vec4 fragColor = vec4(0.0);\n"
+            << "    mainImage(fragColor, fragCoord, iResolution, iTime);\n"
+            << "    material.baseColor = vec4(fragColor.rgb, 1.0);\n"
+            << "}\n"
+            << "}\n";
+    } else if (target == kTargetGlsl) {
         out << "#version 330 core\n"
             << "out vec4 FragColor;\n"
             << "uniform vec2 iResolution;\n"

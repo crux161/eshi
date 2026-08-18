@@ -1,5 +1,9 @@
 const std = @import("std");
 
+/// Kept in step with scripts/vendor_filament.sh, which owns the checksums.
+const filament_version = "v1.75.0";
+const filament_default_path = "third_party/filament/" ++ filament_version;
+
 const example_sources = [_][]const u8{
     "examples/aurora.cpp",
     "examples/bubbles.cpp",
@@ -70,11 +74,16 @@ pub fn build(b: *std.Build) void {
         "filament",
         "Build Larimar's Filament backend (default: false)",
     ) orelse false;
+    // The pinned distribution, fetched and checksummed by
+    // scripts/vendor_filament.sh. The default is the vendored path rather than
+    // whatever Filament checkout happens to exist on the machine: a renderer
+    // that silently builds against a different version than the one its
+    // materials were compiled by is a debugging afternoon nobody needs.
     const filament_path = b.option(
         []const u8,
         "filament-path",
-        "Installed Filament distribution (default: resources/filament/out/release/filament)",
-    ) orelse "resources/filament/out/release/filament";
+        "Installed Filament distribution (default: " ++ filament_default_path ++ ")",
+    ) orelse filament_default_path;
     const filament_arch = b.option(
         []const u8,
         "filament-arch",
@@ -113,21 +122,121 @@ pub fn build(b: *std.Build) void {
         "Path to the libomp prefix on macOS",
     ) orelse b.pathJoin(&.{ homebrew_prefix, "opt", "libomp" });
 
+    ensurePkgConfig(b, homebrew_prefix);
+
     const eshi_step = b.step("eshi", "Build and install only the main eshi executable");
     const examples_step = b.step("examples", "Build and install all example executables");
 
+    // Build-time tools. Neither links a backend or a host: matgen reads a
+    // shader through the same transpiler the runtime uses, and ppmdiff reads
+    // frames a host already dumped.
+    const matgen = addToolExecutable(b, .{
+        .name = "eshi-matgen",
+        .sources = &.{ "core/tools/matgen.cpp", "core/src/render/transpile.cpp" },
+        .target = target,
+        .optimize = optimize,
+    });
+    const ppmdiff = addToolExecutable(b, .{
+        .name = "eshi-ppmdiff",
+        .sources = &.{"core/tools/ppmdiff.cpp"},
+        .target = target,
+        .optimize = optimize,
+    });
+    const gemgen = addToolExecutable(b, .{
+        .name = "eshi-gemgen",
+        .sources = &.{"core/tools/gemgen.cpp"},
+        .target = target,
+        .optimize = optimize,
+    });
+    const matgen_install = b.addInstallArtifact(matgen, .{});
+    const ppmdiff_install = b.addInstallArtifact(ppmdiff, .{});
+    const gemgen_install = b.addInstallArtifact(gemgen, .{});
+    const tools_step = b.step("tools", "Build the material, asset, and frame-comparison tools");
+    tools_step.dependOn(&matgen_install.step);
+    tools_step.dependOn(&ppmdiff_install.step);
+    tools_step.dependOn(&gemgen_install.step);
+    b.getInstallStep().dependOn(&matgen_install.step);
+    b.getInstallStep().dependOn(&ppmdiff_install.step);
+    b.getInstallStep().dependOn(&gemgen_install.step);
+
+
     // Larimar: the Phase 0 engine core plus its hosts. Built independently of
     // the shadertoy gallery above so neither path can break the other.
+    // Every material has exactly one definition: the shader source the Ink tier
+    // compiles and the GPU tiers transpile. matgen re-expresses it as a Filament
+    // material and matc packages that, so no .mat exists as a file anybody can
+    // edit — or forget to edit.
+    const MaterialPackage = struct {
+        fn build(
+            owner: *std.Build,
+            tool: *std.Build.Step.Compile,
+            matc_path: []const u8,
+            source: []const u8,
+            name: []const u8,
+            uniform_floats: []const u8,
+        ) std.Build.LazyPath {
+            const generate = owner.addRunArtifact(tool);
+            generate.addFileArg(owner.path(source));
+            generate.addArgs(&.{ "--uniform-floats", uniform_floats, "-o" });
+            const material = generate.addOutputFileArg(owner.fmt("{s}.mat", .{name}));
+
+            const matc = owner.addSystemCommand(&.{ matc_path, "-p", "all", "-a", "all", "-o" });
+            const output = matc.addOutputFileArg(owner.fmt("{s}.filamat", .{name}));
+            matc.addFileArg(material);
+            return output;
+        }
+    };
+
+    // The GPU tiers read their shader at runtime, so an installed binary needs
+    // the sources installed beside it. Without this, zig-out/bin/pong renders
+    // black frames at Paper or Brush from any directory but this one — the
+    // backend reports the missing file, the banner still names the tier, and
+    // the exit code is zero.
+    const shader_install_dir = b.getInstallPath(.prefix, "share/eshi/shaders");
+    const shaders_step = b.step("shaders", "Install the shader sources and reference asset read at runtime");
+    for (example_sources) |source| {
+        if (!std.mem.endsWith(u8, source, ".cpp")) continue;
+        const install = b.addInstallFile(
+            b.path(source),
+            b.fmt("share/eshi/shaders/{s}", .{std.fs.path.basename(source)}),
+        );
+        shaders_step.dependOn(&install.step);
+    }
+    const install_pong_shader = b.addInstallFile(
+        b.path("examples/pong/pong.gpu.cpp"),
+        "share/eshi/shaders/pong.gpu.cpp",
+    );
+    shaders_step.dependOn(&install_pong_shader.step);
+
+    // The reference asset, generated rather than checked in for the same reason
+    // the materials are: the input is reviewable and the output reproducible.
+    // PLAN Step 8 replaces it with a Blender-authored gem at the same path.
+    const generate_logo = b.addRunArtifact(gemgen);
+    generate_logo.addArg("-o");
+    const logo_glb = generate_logo.addOutputFileArg("larimar_logo.glb");
+    const install_logo = b.addInstallFile(logo_glb, "share/eshi/larimar_logo.glb");
+    shaders_step.dependOn(&install_logo.step);
+    b.getInstallStep().dependOn(shaders_step);
+
+    const matc_path = b.pathJoin(&.{ filament_path, "bin", "matc" });
     const pong_package_path: ?[]const u8 = if (use_filament)
         b.getInstallPath(.prefix, "share/eshi/pong.filamat")
     else
         null;
-    const pong_package: ?std.Build.LazyPath = if (use_filament) package: {
-        const matc = b.addSystemCommand(&.{b.pathJoin(&.{ filament_path, "bin", "matc" }), "-p", "all", "-a", "all", "-o"});
-        const output = matc.addOutputFileArg("pong.filamat");
-        matc.addFileArg(b.path("examples/pong/pong.mat"));
-        break :package output;
-    } else null;
+    const gallery_package_path: ?[]const u8 = if (use_filament)
+        b.getInstallPath(.prefix, "share/eshi/ripple.filamat")
+    else
+        null;
+    const pong_package: ?std.Build.LazyPath = if (use_filament)
+        MaterialPackage.build(b, matgen, matc_path, "examples/pong/pong.gpu.cpp", "pong", "64")
+    else
+        null;
+    // The gallery half of the same claim: ripple reaches Filament from the file
+    // Ink compiles, with nothing written twice on the way.
+    const gallery_package: ?std.Build.LazyPath = if (use_filament)
+        MaterialPackage.build(b, matgen, matc_path, "examples/ripple.cpp", "ripple", "0")
+    else
+        null;
 
     const larimar_install = addLarimarExecutable(b, .{
         .name = "pong",
@@ -137,6 +246,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .sumi_include = sumi_include,
+        .shader_install_dir = shader_install_dir,
         .libomp_prefix = libomp_prefix,
         .use_openmp = use_openmp,
         .use_metal = use_metal,
@@ -144,20 +254,26 @@ pub fn build(b: *std.Build) void {
         .filament_path = filament_path,
         .filament_arch = filament_arch,
         .pong_package_path = pong_package_path,
+        .gallery_package_path = gallery_package_path,
         .use_lto = use_lto,
     });
     const larimar_step = b.step("larimar", "Build the Larimar core and the SDL host (pong)");
     larimar_step.dependOn(&larimar_install.step);
+    // A binary without its shaders renders black frames at the GPU tiers.
+    larimar_step.dependOn(shaders_step);
     b.getInstallStep().dependOn(&larimar_install.step);
     if (pong_package) |package| {
         const install_package = b.addInstallFile(package, "share/eshi/pong.filamat");
+        const install_gallery = b.addInstallFile(gallery_package.?, "share/eshi/ripple.filamat");
         const install_filament_license = b.addInstallFile(
             pathFromOption(b, b.pathJoin(&.{ filament_path, "LICENSE" })),
             "share/licenses/filament/LICENSE",
         );
         larimar_step.dependOn(&install_package.step);
+        larimar_step.dependOn(&install_gallery.step);
         larimar_step.dependOn(&install_filament_license.step);
         b.getInstallStep().dependOn(&install_package.step);
+        b.getInstallStep().dependOn(&install_gallery.step);
         b.getInstallStep().dependOn(&install_filament_license.step);
     }
 
@@ -202,12 +318,29 @@ pub fn build(b: *std.Build) void {
     const sanitized_test_step = b.step("test-sanitize", "Run core tests under ASan and UBSan");
     sanitized_test_step.dependOn(&sanitized_test_command.step);
 
+    const conformance_command = b.addSystemCommand(&.{"./scripts/check_tier_conformance.sh"});
+    conformance_command.step.dependOn(&ppmdiff_install.step);
+    const conformance_step = b.step(
+        "conformance",
+        "Compare the render tiers frame by frame (requires a built pong)",
+    );
+    conformance_step.dependOn(&conformance_command.step);
+
+    // The gates above answer machine questions. This one produces the thing a
+    // person looks at, because "does it still look right" has no other answer.
+    const demo_command = b.addSystemCommand(&.{"./scripts/build_demo.sh"});
+    demo_command.step.dependOn(&larimar_install.step);
+    demo_command.step.dependOn(shaders_step);
+    const demo_step = b.step("demo", "Render build/demo: the same scenes on every available tier");
+    demo_step.dependOn(&demo_command.step);
+
     const main_install = addEshiExecutable(b, .{
         .name = "eshi",
         .shader_source = "shader.cpp",
         .target = target,
         .optimize = optimize,
         .sumi_include = sumi_include,
+        .shader_install_dir = shader_install_dir,
         .libomp_prefix = libomp_prefix,
         .use_metal = use_metal,
         .use_opengl = use_opengl,
@@ -225,6 +358,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .sumi_include = sumi_include,
+            .shader_install_dir = shader_install_dir,
             .libomp_prefix = libomp_prefix,
             .use_metal = use_metal,
             .use_opengl = use_opengl,
@@ -245,6 +379,7 @@ const ExecutableOptions = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     sumi_include: []const u8,
+    shader_install_dir: []const u8,
     libomp_prefix: []const u8,
     use_metal: bool,
     use_opengl: bool,
@@ -262,6 +397,9 @@ fn addEshiExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
 
     module.addIncludePath(b.path("."));
     module.addIncludePath(pathFromOption(b, options.sumi_include));
+    // Where the GPU tiers look for a shader source when the working directory
+    // is not the repository. ESHI_SHADER_DIR overrides it at runtime.
+    module.addCMacro("ESHI_SHADER_INSTALL_DIR", b.fmt("\"{s}\"", .{options.shader_install_dir}));
     module.addCMacro("LINK_SHADER", "1");
 
     const cpp_flags: []const []const u8 = if (options.use_openmp)
@@ -357,6 +495,7 @@ const LarimarOptions = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     sumi_include: []const u8,
+    shader_install_dir: []const u8,
     libomp_prefix: []const u8,
     use_openmp: bool,
     use_metal: bool,
@@ -364,6 +503,7 @@ const LarimarOptions = struct {
     filament_path: []const u8,
     filament_arch: []const u8,
     pong_package_path: ?[]const u8,
+    gallery_package_path: ?[]const u8,
     use_lto: bool,
 };
 
@@ -383,6 +523,9 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
     module.addIncludePath(b.path("."));
     module.addIncludePath(b.path("core/include"));
     module.addIncludePath(pathFromOption(b, options.sumi_include));
+    // Where the GPU tiers look for a shader source when the working directory
+    // is not the repository. ESHI_SHADER_DIR overrides it at runtime.
+    module.addCMacro("ESHI_SHADER_INSTALL_DIR", b.fmt("\"{s}\"", .{options.shader_install_dir}));
 
     const cpp_flags: []const []const u8 = if (options.use_openmp)
         if (options.target.result.os.tag == .macos)
@@ -434,6 +577,9 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
         if (options.pong_package_path) |package_path| {
             module.addCMacro("ESHI_PONG_PACKAGE_PATH", b.fmt("\"{s}\"", .{package_path}));
         }
+        if (options.gallery_package_path) |package_path| {
+            module.addCMacro("ESHI_GALLERY_PACKAGE_PATH", b.fmt("\"{s}\"", .{package_path}));
+        }
         module.addSystemIncludePath(pathFromOption(b, b.pathJoin(&.{ options.filament_path, "include" })));
         module.addLibraryPath(pathFromOption(b, b.pathJoin(&.{ options.filament_path, "lib", options.filament_arch })));
         module.addCSourceFile(.{
@@ -442,11 +588,26 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
             .language = .cpp,
         });
 
+        // gltfio brings its own dependency set: the ubershader archive it
+        // vends materials from, the glTF parser, and the codecs a glTF may
+        // reference. Link order matters for static archives, so the consumers
+        // come before what they consume.
         const filament_libraries = [_][]const u8{
+            "gltfio",
+            "gltfio_core",
             "filament",
             "backend",
             "filabridge",
             "filaflat",
+            "geometry",
+            "dracodec",
+            "ktxreader",
+            "image",
+            "meshoptimizer",
+            "stb",
+            "uberarchive",
+            "uberzlib",
+            "basis_transcoder",
             "bluegl",
             "bluevk",
             "smol-v",
@@ -507,6 +668,113 @@ fn addLarimarExecutable(b: *std.Build, options: LarimarOptions) *std.Build.Step.
     exe.lto = if (options.use_lto) .full else .none;
 
     return b.addInstallArtifact(exe, .{});
+}
+
+/// Makes `pkg-config` usable when the one on PATH cannot see system packages.
+///
+/// On a machine with devkitpro installed, `pkg-config` resolves to devkitpro's,
+/// whose built-in search path contains only devkitpro's own packages. Every
+/// SDL-linked target then aborts with `pkg-config failed for library SDL2_ttf`
+/// — a Zig panic and a stack trace, for what is really an unset environment
+/// variable. Probing first means a machine whose pkg-config already works is
+/// left exactly as it was.
+fn ensurePkgConfig(b: *std.Build, homebrew_prefix: []const u8) void {
+    if (pkgConfigSees(b, "SDL2_ttf")) return;
+
+    var search: []const u8 = b.graph.environ_map.get("PKG_CONFIG_PATH") orelse "";
+    search = appendPkgConfigDir(b, search, b.pathJoin(&.{ homebrew_prefix, "lib", "pkgconfig" }));
+    search = appendPkgConfigDir(b, search, b.pathJoin(&.{ homebrew_prefix, "share", "pkgconfig" }));
+    // Every keg-only formula keeps its own .pc files under opt/<name>/lib.
+    search = appendPkgConfigTree(b, search, b.pathJoin(&.{ homebrew_prefix, "opt" }), &.{ "lib", "pkgconfig" });
+    // And Homebrew keeps the macOS system-library .pc files per OS version, which
+    // is where SDL2_ttf -> freetype2 -> zlib finally resolves.
+    search = appendPkgConfigTree(b, search, b.pathJoin(&.{ homebrew_prefix, "Library", "Homebrew", "os", "mac", "pkgconfig" }), &.{});
+
+    if (search.len == 0) return;
+    b.graph.environ_map.put("PKG_CONFIG_PATH", search) catch return;
+
+    if (!pkgConfigSees(b, "SDL2_ttf")) {
+        std.debug.print(
+            \\note: pkg-config cannot find SDL2_ttf, so SDL-linked targets will fail.
+            \\  `pkg-config` on PATH is {s}. Install the dependencies, or set
+            \\  PKG_CONFIG_PATH to a prefix that has them.
+            \\
+        , .{b.graph.environ_map.get("PATH") orelse "unset"});
+    }
+}
+
+/// True when pkg-config, as the build will invoke it, knows this package.
+///
+/// runAllowFail returns an error for any non-zero exit and only writes the code
+/// on that path, so success is "it returned at all" — reading the code instead
+/// reports every probe as a failure, including the one that works.
+fn pkgConfigSees(b: *std.Build, package: []const u8) bool {
+    var code: u8 = 1;
+    const output = b.runAllowFail(
+        &.{ "pkg-config", "--exists", package },
+        &code,
+        .ignore,
+    ) catch return false;
+    b.allocator.free(output);
+    return true;
+}
+
+fn appendPkgConfigDir(b: *std.Build, search: []const u8, dir: []const u8) []const u8 {
+    std.Io.Dir.accessAbsolute(b.graph.io, dir, .{}) catch return search;
+    if (search.len == 0) return dir;
+    return b.fmt("{s}:{s}", .{ search, dir });
+}
+
+/// Appends `<root>/<entry>/<suffix...>` for every entry in `root`.
+fn appendPkgConfigTree(b: *std.Build, search: []const u8, root: []const u8, suffix: []const []const u8) []const u8 {
+    var result = search;
+    var dir = std.Io.Dir.openDirAbsolute(b.graph.io, root, .{ .iterate = true }) catch return result;
+    defer dir.close(b.graph.io);
+    var it = dir.iterate();
+    while (it.next(b.graph.io) catch null) |entry| {
+        if (entry.kind != .directory and entry.kind != .sym_link) continue;
+        var parts = std.ArrayList([]const u8).initCapacity(b.allocator, suffix.len + 2) catch return result;
+        parts.appendAssumeCapacity(root);
+        parts.appendAssumeCapacity(entry.name);
+        for (suffix) |part| parts.appendAssumeCapacity(part);
+        result = appendPkgConfigDir(b, result, b.pathJoin(parts.items));
+    }
+    return result;
+}
+
+const ToolOptions = struct {
+    name: []const u8,
+    sources: []const []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+};
+
+/// A host-side tool: C++ and libc++ only, no SDL, no FFmpeg, no backend.
+///
+/// These run on a build machine, never on a device, so they take none of the
+/// options the runtime executables carry. If one of them ever needs a system
+/// package, it has stopped being a tool.
+fn addToolExecutable(b: *std.Build, options: ToolOptions) *std.Build.Step.Compile {
+    const module = b.createModule(.{
+        .target = options.target,
+        .optimize = options.optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    module.addIncludePath(b.path("core/include"));
+    module.addCSourceFiles(.{
+        .files = options.sources,
+        .flags = &.{ "-std=c++11", "-Wall", "-Wextra" },
+        .language = .cpp,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = options.name,
+        .root_module = module,
+        .use_llvm = true,
+    });
+    exe.lto = .none;
+    return exe;
 }
 
 fn pathFromOption(b: *std.Build, path: []const u8) std.Build.LazyPath {
