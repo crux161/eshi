@@ -71,3 +71,6 @@ Thumbs.db
 # Larimar reference material — untracked loose copies, not dependencies
 resources/gyosho/
 resources/SumiC/
+
+# Downloaded Filament SDK distributions
+/third_party/filament/

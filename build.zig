@@ -7,6 +7,7 @@ const example_sources = [_][]const u8{
     "examples/fractal.cpp",
     "examples/funky.cpp",
     "examples/harlequin.zig",
+    "examples/larimar_caustics.cpp",
     "examples/lunar.cpp",
     "examples/mario.cpp",
     "examples/neon.cpp",
@@ -123,7 +124,7 @@ pub fn build(b: *std.Build) void {
     else
         null;
     const pong_package: ?std.Build.LazyPath = if (use_filament) package: {
-        const matc = b.addSystemCommand(&.{b.pathJoin(&.{ filament_path, "bin", "matc" }), "-p", "all", "-a", "all", "-o"});
+        const matc = b.addSystemCommand(&.{ b.pathJoin(&.{ filament_path, "bin", "matc" }), "-p", "all", "-a", "all", "-o" });
         const output = matc.addOutputFileArg("pong.filamat");
         matc.addFileArg(b.path("examples/pong/pong.mat"));
         break :package output;
