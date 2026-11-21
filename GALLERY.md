@@ -7,6 +7,7 @@ A collection of examples built with the ESHI framework. All examples run in real
 | <img src="resources/aurora.gif" width="300"> | **Aurora** | Layered aurora curtains over a moonlit lake with mountain silhouettes and rippled reflections. (an Eshi original) |
 | <img src="resources/warp.gif" width="300"> | **Warp** | A domain warping noise effect commonly used in clouds and terrain generation. Demonstrates `sampler2D` usage in CUDA. (https://www.shadertoy.com/user/Shane) |
 | <img src="resources/deepsea.gif" width="300"> | **Deep Sea** | Volumetric lighting and raymarching simulating underwater caustic patterns. (an Eshi original) |
+| <img src="resources/larimar_caustics.gif" width="300"> | **Larimar Caustics** | A moving web of refracted sunlight over a turquoise sand bar, using surface curvature, colour dispersion, and depth-dependent absorption. (an Eshi original) |
 | <img src="resources/fractal.gif" width="300"> | **Fractal** | Iterative Mandelbulb/Julia set rendering showing high-precision floating point capabilities. |
 | <img src="resources/bubbles.gif" width="300"> | **Bubbles** | Particle system simulation demonstrating efficient distance field collisions. |
 | <img src="resources/neon.gif" width="300"> | **Neon** | Glow effects and post-processing bloom implementation. (https://www.shadertoy.com/user/kishimisu) |
